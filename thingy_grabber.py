@@ -18,6 +18,13 @@ TOTAL_REGEX = re.compile(r'"total":(\d*),')
 LAST_PAGE_REGEX = re.compile(r'"last_page":(\d*),')
 # This appears to be fixed at 12, but if it changes would screw the rest up.
 PER_PAGE_REGEX = re.compile(r'"per_page":(\d*),')
+NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
+
+VERBOSE = False
+
+def strip_ws(value):
+    """ Remove whitespace from a string """
+    return str(NO_WHITESPACE_REGEX.sub('-', value))
 
 def slugify(value):
     """
@@ -26,7 +33,8 @@ def slugify(value):
     """
     value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode()
     value = str(re.sub(r'[^\w\s-]', '', value).strip())
-    value = str(re.sub(r'[-\s]+', '-', value))
+    value = str(NO_WHITESPACE_REGEX.sub('-', value))
+    #value = str(re.sub(r'[-\s]+', '-', value))
     return value
 
 class Collection:
@@ -55,7 +63,9 @@ class Collection:
             return self.things
 
         # Get the internal details of the collection.
-        c_url = "{}/{}/collections/{}".format(URL_BASE, self.user, self.name)
+        c_url = "{}/{}/collections/{}".format(URL_BASE, self.user, strip_ws(self.name))
+        if VERBOSE:
+            print("Querying {}".format(c_url))
         c_req = requests.get(c_url)
         total = TOTAL_REGEX.search(c_req.text)
         if total is None:
@@ -126,7 +136,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("owner", help="The owner of the collection to get")
     parser.add_argument("collection", help="The name of the collection to get")
+    parser.add_argument("-v", "--verbose", help="Be more verbose", action="store_true")
     args = parser.parse_args()
+    global VERBOSE
+    VERBOSE = args.verbose
 
     collection = Collection(args.owner, args.collection)
     print(collection.get_collection())

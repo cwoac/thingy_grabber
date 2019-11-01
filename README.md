@@ -6,7 +6,7 @@ Script for archiving thingiverse things. Due to this being a glorified webscrape
 Where `user_name` is the name of the creator of the collection (not nes. your name!) and `collection_name` is the name of the collection you want.
 
 ## Requirements
-python3, beautifulsoup4
+python3, beautifulsoup4, requests, lxml
 
 ## Current features:
 - can download an entire collection, creating seperate subdirs for each thing in the collection
@@ -15,5 +15,4 @@ python3, beautifulsoup4
 - download a single thing
 - download things by designer
 - less perfunctory error checking / handling
-- windows support?
 - resume failed things

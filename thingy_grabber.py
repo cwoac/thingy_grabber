@@ -125,10 +125,17 @@ def download_thing(thing):
     file_links = file_soup.find_all('a', {'class':'file-download'})
     files = [("{}{}".format(URL_BASE, x['href']), x["title"]) for x in file_links]
 
-    for url, name in files:
-        data_req = requests.get(url)
-        with open(name, 'wb') as handle:
-            handle.write(data_req.content)
+    try:
+        for url, name in files:
+            data_req = requests.get(url)
+            with open(name, 'wb') as handle:
+                handle.write(data_req.content)
+    except Exception as exception:
+        print("Failed to download {} - {}".format(name, exception))
+        os.chdir(base_dir)
+        os.rename(title, "{}_failed".format(title))
+        return
+
     os.chdir(base_dir)
 
 def main():

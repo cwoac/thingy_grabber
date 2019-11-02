@@ -117,24 +117,56 @@ def download_thing(thing):
     try:
         os.mkdir(title)
     except FileExistsError:
-        print("Directory for {} ({}) already exists, skipping".format(thing, title))
-        return
+        pass
+
     print("Downloading {} ({})".format(thing, title))
     os.chdir(title)
+    last_time = None
+
+    try:
+        with open('timestamp.txt', 'r') as fh:
+            last_time = fh.readlines()[0]
+        if VERBOSE:
+            print("last downloaded version: {}".format(last_time))
+    except FileNotFoundError:
+        # Not run on this thing before.
+        if VERBOSE:
+            print('Directory for thing already exists, checking for update.')
+        last_time = None
 
     file_links = file_soup.find_all('a', {'class':'file-download'})
-    files = [("{}{}".format(URL_BASE, x['href']), x["title"]) for x in file_links]
+    new_last_time = last_time
+    new_file_links = []
+
+    for file_link in file_links:
+        timestamp = file_link.find_all('time')[0]['datetime']
+        if VERBOSE:
+            print("Checking {} (updated {})".format(file_link["title"], timestamp))
+        if not last_time or timestamp > last_time:
+            new_file_links.append(file_link)
+        if not new_last_time or timestamp > new_last_time:
+            new_last_time = timestamp
+
+    if last_time and new_last_time <= last_time:
+        print("Thing already downloaded. Skipping.")
+    files = [("{}{}".format(URL_BASE, x['href']), x["title"]) for x in new_file_links]
 
     try:
         for url, name in files:
+            if VERBOSE:
+                print("Downloading {} from {}".format(name, url))
             data_req = requests.get(url)
             with open(name, 'wb') as handle:
                 handle.write(data_req.content)
+        # now write timestamp
+        with open('timestamp.txt', 'w') as fh:
+            fh.write(new_last_time)
     except Exception as exception:
         print("Failed to download {} - {}".format(name, exception))
         os.chdir(base_dir)
         os.rename(title, "{}_failed".format(title))
         return
+
 
     os.chdir(base_dir)
 

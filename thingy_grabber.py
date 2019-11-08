@@ -4,6 +4,7 @@ Thingiverse bulk downloader
 """
 
 import re
+import sys
 import os
 import argparse
 import unicodedata
@@ -124,8 +125,8 @@ def download_thing(thing):
     last_time = None
 
     try:
-        with open('timestamp.txt', 'r') as fh:
-            last_time = fh.readlines()[0]
+        with open('timestamp.txt', 'r') as timestamp_handle:
+            last_time = timestamp_handle.readlines()[0]
         if VERBOSE:
             print("last downloaded version: {}".format(last_time))
     except FileNotFoundError:
@@ -159,8 +160,8 @@ def download_thing(thing):
             with open(name, 'wb') as handle:
                 handle.write(data_req.content)
         # now write timestamp
-        with open('timestamp.txt', 'w') as fh:
-            fh.write(new_last_time)
+        with open('timestamp.txt', 'w') as timestamp_handle:
+            timestamp_handle.write(new_last_time)
     except Exception as exception:
         print("Failed to download {} - {}".format(name, exception))
         os.chdir(base_dir)
@@ -173,16 +174,27 @@ def download_thing(thing):
 def main():
     """ Entry point for script being run as a command. """
     parser = argparse.ArgumentParser()
-    parser.add_argument("owner", help="The owner of the collection to get")
-    parser.add_argument("collection", help="The name of the collection to get")
     parser.add_argument("-v", "--verbose", help="Be more verbose", action="store_true")
+    subparsers = parser.add_subparsers(help="Type of thing to download", dest="subcommand")
+    collection_parser = subparsers.add_parser('collection', help="Download an entire collection")
+    collection_parser.add_argument("owner", help="The owner of the collection to get")
+    collection_parser.add_argument("collection", help="The name of the collection to get")
+    thing_parser = subparsers.add_parser('thing', help="Download a single thing.")
+    thing_parser.add_argument("thing", help="Thing ID to download")
+
     args = parser.parse_args()
+    if not args.subcommand:
+        parser.print_help()
+        sys.exit(1)
     global VERBOSE
     VERBOSE = args.verbose
+    if args.subcommand.startswith("collection"):
+        collection = Collection(args.owner, args.collection)
+        print(collection.get_collection())
+        collection.download()
+    if args.subcommand == "thing":
+        download_thing(args.thing)
 
-    collection = Collection(args.owner, args.collection)
-    print(collection.get_collection())
-    collection.download()
 
 if __name__ == "__main__":
     main()

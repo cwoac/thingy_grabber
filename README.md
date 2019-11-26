@@ -44,11 +44,10 @@ python3, beautifulsoup4, requests, lxml
 ## Current features:
 - can download an entire collection, creating seperate subdirs for each thing in the collection
 - If you run it again with the same settings, it will check for updated files and only update what has changed. This should make it suitible for syncing a collection on a cronjob
-CAVEAT: This script will *not delete files*. So if there has been an update and some files have been moved or renamed, they will be mixed in with the old stuff.
+- If there is an updated file, the old directory will be moved to `name_timestamp` where `timestamp` is the last upload time of the old files. The code will then copy unchanged files across and download any new ones.
 
 
 ## Todo features (maybe):
 - less perfunctory error checking / handling
 - attempt to use -failed dirs for resuming
 - pull down images as well
-- handle old/deleted files on update

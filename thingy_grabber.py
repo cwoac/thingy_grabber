@@ -9,6 +9,7 @@ import os
 import argparse
 import unicodedata
 import requests
+from shutil import copyfile
 from bs4 import BeautifulSoup
 
 URL_BASE = "https://www.thingiverse.com"
@@ -39,7 +40,10 @@ def slugify(value):
     return value
 
 class Grouping:
-    """ Holds details of a group of things. """
+    """ Holds details of a group of things.
+        This is effectively (although not actually) an abstract class
+        - use Collection or Designs instead.
+    """
     def __init__(self):
         self.things = []
         self.total = 0
@@ -108,11 +112,10 @@ class Grouping:
         try:
             os.mkdir(self.download_dir)
         except FileExistsError:
-            print("Target directory {} already exists. Assuming a resume.".format(self.download_dir))
-        os.chdir(self.download_dir)
+            print("Target directory {} already exists. Assuming a resume."
+                  .format(self.download_dir))
         for thing in self.things:
-            download_thing(thing)
-        os.chdir(base_dir)
+            Thing(thing).download(self.download_dir)
 
 class Collection(Grouping):
     """ Holds details of a collection. """
@@ -120,8 +123,10 @@ class Collection(Grouping):
         Grouping.__init__(self)
         self.user = user
         self.name = name
-        self.url = "{}/{}/collections/{}".format(URL_BASE, self.user, strip_ws(self.name))
-        self.download_dir = os.path.join(os.getcwd(), "{}-{}".format(slugify(self.user), slugify(self.name)))
+        self.url = "{}/{}/collections/{}".format(
+            URL_BASE, self.user, strip_ws(self.name))
+        self.download_dir = os.path.join(os.getcwd(),
+                                         "{}-{}".format(slugify(self.user), slugify(self.name)))
 
 class Designs(Grouping):
     """ Holds details of all of a users' designs. """
@@ -131,69 +136,167 @@ class Designs(Grouping):
         self.url = "{}/{}/designs".format(URL_BASE, self.user)
         self.download_dir = os.path.join(os.getcwd(), "{} designs".format(slugify(self.user)))
 
-def download_thing(thing):
-    """ Downloads all the files for a given thing. """
-    file_url = "{}/thing:{}/files".format(URL_BASE, thing)
-    file_req = requests.get(file_url)
-    file_soup = BeautifulSoup(file_req.text, features='lxml')
+class Thing:
+    """ An individual design on thingiverse. """
+    def __init__(self, thing_id):
+        self.thing_id = thing_id
+        self.last_time = None
+        self._parsed = False
+        self._needs_download = True
+        self.text = None
+        self.title = None
+        self.download_dir = None
 
-    title = slugify(file_soup.find_all('h1')[0].text.strip())
-    base_dir = os.getcwd()
-    try:
-        os.mkdir(title)
-    except FileExistsError:
-        pass
+    def _parse(self, base_dir):
+        """ Work out what, if anything needs to be done. """
+        if self._parsed:
+            return
 
-    print("Downloading {} ({})".format(thing, title))
-    os.chdir(title)
-    last_time = None
+        url = "{}/thing:{}/files".format(URL_BASE, self.thing_id)
+        req = requests.get(url)
+        self.text = req.text
+        soup = BeautifulSoup(self.text, features='lxml')
 
-    try:
-        with open('timestamp.txt', 'r') as timestamp_handle:
-            last_time = timestamp_handle.readlines()[0]
-        if VERBOSE:
-            print("last downloaded version: {}".format(last_time))
-    except FileNotFoundError:
-        # Not run on this thing before.
-        if VERBOSE:
-            print('Directory for thing already exists, checking for update.')
-        last_time = None
+        self.title = slugify(soup.find_all('h1')[0].text.strip())
+        self.download_dir = os.path.join(base_dir, self.title)
 
-    file_links = file_soup.find_all('a', {'class':'file-download'})
-    new_last_time = last_time
-    new_file_links = []
+        if not os.path.exists(self.download_dir):
+            # Not yet downloaded
+            self._parsed = True
+            return
 
-    for file_link in file_links:
-        timestamp = file_link.find_all('time')[0]['datetime']
-        if VERBOSE:
-            print("Checking {} (updated {})".format(file_link["title"], timestamp))
-        if not last_time or timestamp > last_time:
-            new_file_links.append(file_link)
-        if not new_last_time or timestamp > new_last_time:
-            new_last_time = timestamp
-
-    if last_time and new_last_time <= last_time:
-        print("Thing already downloaded. Skipping.")
-    files = [("{}{}".format(URL_BASE, x['href']), x["title"]) for x in new_file_links]
-
-    try:
-        for url, name in files:
+        timestamp_file = os.path.join(self.download_dir, 'timestamp.txt')
+        if not os.path.exists(timestamp_file):
+            # Old download from before
             if VERBOSE:
-                print("Downloading {} from {}".format(name, url))
-            data_req = requests.get(url)
-            with open(name, 'wb') as handle:
-                handle.write(data_req.content)
-        # now write timestamp
-        with open('timestamp.txt', 'w') as timestamp_handle:
-            timestamp_handle.write(new_last_time)
-    except Exception as exception:
-        print("Failed to download {} - {}".format(name, exception))
-        os.chdir(base_dir)
-        os.rename(title, "{}_failed".format(title))
-        return
+                print("Old-style download directory found. Assuming update required.")
+            self._parsed = True
+            return
 
+        try:
+            with open(timestamp_file, 'r') as timestamp_handle:
+                self.last_time = timestamp_handle.readlines()[0]
+            if VERBOSE:
+                print("last downloaded version: {}".format(self.last_time))
+        except FileNotFoundError:
+            # Not run on this thing before.
+            if VERBOSE:
+                print("Old-style download directory found. Assuming update required.")
+            self.last_time = None
+            self._parsed = True
+            return
 
-    os.chdir(base_dir)
+        # OK, so we have a timestamp, lets see if there is anything new to get
+        file_links = soup.find_all('a', {'class':'file-download'})
+        for file_link in file_links:
+            timestamp = file_link.find_all('time')[0]['datetime']
+            if VERBOSE:
+                print("Checking {} (updated {})".format(file_link["title"], timestamp))
+            if timestamp > self.last_time:
+                print("Found new/updated file {}".format(file_link["title"]))
+                self._needs_download = True
+                self._parsed = True
+                return
+        # Got here, so nope, no new files.
+        print("Found no new files for {}".format(self.title))
+        self._needs_download = False
+        self._parsed = True
+
+    def download(self, base_dir):
+        """ Download all files for a given thing. """
+        if not self._parsed:
+            self._parse(base_dir)
+
+        if not self._needs_download:
+            if VERBOSE:
+                print("{} already downloaded - skipping.".format(self.title))
+            return
+
+        # Have we already downloaded some things?
+        timestamp_file = os.path.join(self.download_dir, 'timestamp.txt')
+        prev_dir = None
+        if os.path.exists(self.download_dir):
+            if not os.path.exists(timestamp_file):
+                # edge case: old style dir w/out timestamp.
+                print("Old style download dir found for {}".format(self.title))
+                os.rename(self.download_dir, "{}_old".format(self.download_dir))
+            else:
+                prev_dir = "{}_{}".format(self.download_dir, self.last_time)
+                os.rename(self.download_dir, prev_dir)
+
+        # Get the list of files to download
+        soup = BeautifulSoup(self.text, features='lxml')
+        file_links = soup.find_all('a', {'class':'file-download'})
+
+        new_file_links = []
+        old_file_links = []
+        new_last_time = None
+
+        if not self.last_time:
+            # If we don't have anything to copy from, then it is all new.
+            new_file_links = file_links
+            new_last_time = file_links[0].find_all('time')[0]['datetime']
+            for file_link in file_links:
+                timestamp = file_link.find_all('time')[0]['datetime']
+                if VERBOSE:
+                    print("Found file {} from {}".format(file_link["title"], timestamp))
+                if timestamp > new_last_time:
+                    new_last_time = timestamp
+        else:
+            for file_link in file_links:
+                timestamp = file_link.find_all('time')[0]['datetime']
+                if VERBOSE:
+                    print("Checking {} (updated {})".format(file_link["title"], timestamp))
+                if timestamp > self.last_time:
+                    new_file_links.append(file_link)
+                else:
+                    old_file_links.append(file_link)
+                if not new_last_time or timestamp > new_last_time:
+                    new_last_time = timestamp
+
+        if VERBOSE:
+            print("new timestamp {}".format(new_last_time))
+
+        # OK. Time to get to work.
+        os.mkdir(self.download_dir)
+        # First grab the cached files (if any)
+        for file_link in old_file_links:
+            old_file = os.path.join(prev_dir, file_link["title"])
+            new_file = os.path.join(self.download_dir, file_link["title"])
+            try:
+                if VERBOSE:
+                    print("Copying {} to {}".format(old_file, new_file))
+                copyfile(old_file, new_file)
+            except FileNotFoundError:
+                print("Unable to find {} in old archive, redownloading".format(file_link["title"]))
+                new_file_links.append(file_link)
+
+        # Now download the new ones
+        files = [("{}{}".format(URL_BASE, x['href']), x["title"]) for x in new_file_links]
+        try:
+            for url, name in files:
+                file_name = os.path.join(self.download_dir, name)
+                if VERBOSE:
+                    print("Downloading {} from {} to {}".format(name, url, file_name))
+                data_req = requests.get(url)
+                with open(file_name, 'wb') as handle:
+                    handle.write(data_req.content)
+        except Exception as exception:
+            print("Failed to download {} - {}".format(name, exception))
+            os.rename(self.download_dir, "{}_failed".format(self.download_dir))
+            return
+
+        try:
+            # Now write the timestamp
+            with open(timestamp_file, 'w') as timestamp_handle:
+                timestamp_handle.write(new_last_time)
+        except Exception as exception:
+            print("Failed to write timestamp file - {}".format(exception))
+            os.rename(self.download_dir, "{}_failed".format(self.download_dir))
+            return
+        self._needs_download = False
+        if VERBOSE:
+            print("Download of {} finished".format(self.title))
 
 def main():
     """ Entry point for script being run as a command. """
@@ -219,7 +322,7 @@ def main():
         print(collection.get())
         collection.download()
     if args.subcommand == "thing":
-        download_thing(args.thing)
+        Thing(args.thing).download(os.getcwd())
     if args.subcommand == "user":
         designs = Designs(args.user)
         print(designs.get())

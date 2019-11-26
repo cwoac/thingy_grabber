@@ -38,46 +38,51 @@ def slugify(value):
     #value = str(re.sub(r'[-\s]+', '-', value))
     return value
 
-class Collection:
-    """ Holds details of a collection. """
-    def __init__(self, user, name):
-        self.user = user
-        self.name = name
+class Grouping:
+    """ Holds details of a group of things. """
+    def __init__(self):
         self.things = []
         self.total = 0
         self.req_id = None
         self.last_page = 0
         self.per_page = None
+        # These two should be set by child classes.
+        self.url = None
+        self.download_dir = None
 
-    def _get_small_collection(self, req):
-        """ Handle small collections """
+    def _get_small_grouping(self, req):
+        """ Handle small groupings """
         soup = BeautifulSoup(req.text, features='lxml')
         links = soup.find_all('a', {'class':'card-img-holder'})
         self.things = [x['href'].split(':')[1] for x in links]
 
         return self.things
 
-    def get_collection(self):
-        """ retrieve the things of the collection. """
+    def get(self):
+        """ retrieve the things of the grouping. """
         if self.things:
             # We've already done it.
             return self.things
 
-        # Get the internal details of the collection.
-        c_url = "{}/{}/collections/{}".format(URL_BASE, self.user, strip_ws(self.name))
+        # Check for initialisation:
+        if not self.url:
+            print("No URL set - object not initialised properly?")
+            raise ValueError("No URL set - object not initialised properly?")
+
+        # Get the internal details of the grouping.
         if VERBOSE:
-            print("Querying {}".format(c_url))
-        c_req = requests.get(c_url)
+            print("Querying {}".format(self.url))
+        c_req = requests.get(self.url)
         total = TOTAL_REGEX.search(c_req.text)
         if total is None:
-            # This is a small (<13) items collection. Pull the list from this req.
-            return self._get_small_collection(c_req)
+            # This is a small (<13) items grouping. Pull the list from this req.
+            return self._get_small_grouping(c_req)
         self.total = total.groups()[0]
         self.req_id = ID_REGEX.search(c_req.text).groups()[0]
         self.last_page = int(LAST_PAGE_REGEX.search(c_req.text).groups()[0])
         self.per_page = PER_PAGE_REGEX.search(c_req.text).groups()[0]
         parameters = {
-            'base_url':"{}/collections/{}".format(self.user, self.name),
+            'base_url':self.url,
             'page':'1',
             'per_page':'12',
             'id':self.req_id
@@ -94,18 +99,37 @@ class Collection:
     def download(self):
         """ Downloads all the files in a collection """
         if not self.things:
-            self.get_collection()
+            self.get()
+
+        if not self.download_dir:
+            raise ValueError("No download_dir set - invalidly initialised object?")
+
         base_dir = os.getcwd()
-        new_dir = "{}-{}".format(slugify(self.user), slugify(self.name))
-        target_dir = os.path.join(base_dir, new_dir)
         try:
-            os.mkdir(target_dir)
+            os.mkdir(self.download_dir)
         except FileExistsError:
-            print("Target directory {} already exists. Assuming a resume.".format(new_dir))
-        os.chdir(target_dir)
+            print("Target directory {} already exists. Assuming a resume.".format(self.download_dir))
+        os.chdir(self.download_dir)
         for thing in self.things:
             download_thing(thing)
+        os.chdir(base_dir)
 
+class Collection(Grouping):
+    """ Holds details of a collection. """
+    def __init__(self, user, name):
+        Grouping.__init__(self)
+        self.user = user
+        self.name = name
+        self.url = "{}/{}/collections/{}".format(URL_BASE, self.user, strip_ws(self.name))
+        self.download_dir = os.path.join(os.getcwd(), "{}-{}".format(slugify(self.user), slugify(self.name)))
+
+class Designs(Grouping):
+    """ Holds details of all of a users' designs. """
+    def __init__(self, user):
+        Grouping.__init__(self)
+        self.user = user
+        self.url = "{}/{}/designs".format(URL_BASE, self.user)
+        self.download_dir = os.path.join(os.getcwd(), "{} designs".format(slugify(self.user)))
 
 def download_thing(thing):
     """ Downloads all the files for a given thing. """
@@ -181,6 +205,8 @@ def main():
     collection_parser.add_argument("collection", help="The name of the collection to get")
     thing_parser = subparsers.add_parser('thing', help="Download a single thing.")
     thing_parser.add_argument("thing", help="Thing ID to download")
+    user_parser = subparsers.add_parser("user", help="Download all things by a user")
+    user_parser.add_argument("user", help="The user to get the designs of")
 
     args = parser.parse_args()
     if not args.subcommand:
@@ -190,10 +216,15 @@ def main():
     VERBOSE = args.verbose
     if args.subcommand.startswith("collection"):
         collection = Collection(args.owner, args.collection)
-        print(collection.get_collection())
+        print(collection.get())
         collection.download()
     if args.subcommand == "thing":
         download_thing(args.thing)
+    if args.subcommand == "user":
+        designs = Designs(args.user)
+        print(designs.get())
+        designs.download()
+
 
 
 if __name__ == "__main__":

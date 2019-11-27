@@ -3,7 +3,7 @@ Script for archiving thingiverse things. Due to this being a glorified webscrape
 
 ## Usage:
 ````
-usage: thingy_grabber.py [-h] [-v] {collection,thing,user} ...
+usage: thingy_grabber.py [-h] [-v] [-d DIRECTORY] {collection,thing,user} ...
 
 positional arguments:
   {collection,thing,user}
@@ -15,6 +15,8 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
   -v, --verbose         Be more verbose
+  -d DIRECTORY, --directory DIRECTORY
+                        Target directory to download into
 ````
 
 ### Things

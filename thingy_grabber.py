@@ -41,7 +41,7 @@ def slugify(value):
     return value
 
 class Grouping:
-    """ Holds details of a group of things.
+    """ Holds details of a group of things for download
         This is effectively (although not actually) an abstract class
         - use Collection or Designs instead.
     """
@@ -123,23 +123,23 @@ class Grouping:
 
 class Collection(Grouping):
     """ Holds details of a collection. """
-    def __init__(self, user, name):
+    def __init__(self, user, name, directory):
         Grouping.__init__(self)
         self.user = user
         self.name = name
         self.url = "{}/{}/collections/{}".format(
             URL_BASE, self.user, strip_ws(self.name))
-        self.download_dir = os.path.join(os.getcwd(),
+        self.download_dir = os.path.join(directory,
                                          "{}-{}".format(slugify(self.user), slugify(self.name)))
         self.collection_url = URL_COLLECTION
 
 class Designs(Grouping):
     """ Holds details of all of a users' designs. """
-    def __init__(self, user):
+    def __init__(self, user, directory):
         Grouping.__init__(self)
         self.user = user
         self.url = "{}/{}/designs".format(URL_BASE, self.user)
-        self.download_dir = os.path.join(os.getcwd(), "{} designs".format(slugify(self.user)))
+        self.download_dir = os.path.join(directory, "{} designs".format(slugify(self.user)))
         self.collection_url = USER_COLLECTION
 
 class Thing:
@@ -308,6 +308,7 @@ def main():
     """ Entry point for script being run as a command. """
     parser = argparse.ArgumentParser()
     parser.add_argument("-v", "--verbose", help="Be more verbose", action="store_true")
+    parser.add_argument("-d", "--directory", help="Target directory to download into")
     subparsers = parser.add_subparsers(help="Type of thing to download", dest="subcommand")
     collection_parser = subparsers.add_parser('collection', help="Download an entire collection")
     collection_parser.add_argument("owner", help="The owner of the collection to get")
@@ -321,16 +322,19 @@ def main():
     if not args.subcommand:
         parser.print_help()
         sys.exit(1)
+    if not args.directory:
+        args.directory = os.getcwd()
+
     global VERBOSE
     VERBOSE = args.verbose
     if args.subcommand.startswith("collection"):
-        collection = Collection(args.owner, args.collection)
+        collection = Collection(args.owner, args.collection, args.directory)
         print(collection.get())
         collection.download()
     if args.subcommand == "thing":
-        Thing(args.thing).download(os.getcwd())
+        Thing(args.thing).download(args.directory)
     if args.subcommand == "user":
-        designs = Designs(args.user)
+        designs = Designs(args.user, args.directory)
         print(designs.get())
         designs.download()
 

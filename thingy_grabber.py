@@ -165,6 +165,9 @@ class Thing:
         self.text = req.text
         soup = BeautifulSoup(self.text, features='lxml')
 
+        print("Found no new files for {}".format(self.title))
+        #import code
+        #code.interact(local=dict(globals(), **locals()))
         self.title = slugify(soup.find_all('h1')[0].text.strip())
         self.download_dir = os.path.join(base_dir, self.title)
 
@@ -206,7 +209,7 @@ class Thing:
                 self._parsed = True
                 return
         # Got here, so nope, no new files.
-        print("Found no new files for {}".format(self.title))
+        code.interact(local=dict(globals(), **locals()))
         self._needs_download = False
         self._parsed = True
 
@@ -294,6 +297,27 @@ class Thing:
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
             return
 
+        # People like images
+        image_dir = os.path.join(self.download_dir, 'images')
+        try:
+            os.mkdir(image_dir)
+            for imagelink in soup.find_all('span', {'class':'gallery-slider'})[0] \
+                                 .find_all('div', {'class':'gallery-photo'}):
+                url = imagelink['data-full']
+                filename = os.path.basename(url)
+                if filename.endswith('stl'):
+                    filename = "{}.png".format(filename)
+                image_req = requests.get(url)
+                with open(os.path.join(image_dir, filename), 'wb') as handle:
+                    handle.write(image_req.content)
+        except Exception as exception:
+            print("Failed to download {} - {}".format(filename, exception))
+            os.rename(self.download_dir, "{}_failed".format(self.download_dir))
+            return
+
+
+
+
         try:
             # Now write the timestamp
             with open(timestamp_file, 'w') as timestamp_handle:
@@ -319,7 +343,7 @@ def main():
     thing_parser.add_argument("thing", help="Thing ID to download")
     user_parser = subparsers.add_parser("user", help="Download all things by a user")
     user_parser.add_argument("user", help="The user to get the designs of")
-    version_parser = subparsers.add_parser("version", help="Show the current version")
+    subparsers.add_parser("version", help="Show the current version")
 
     args = parser.parse_args()
     if not args.subcommand:

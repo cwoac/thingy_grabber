@@ -48,8 +48,15 @@ python3, beautifulsoup4, requests, lxml
 - If you run it again with the same settings, it will check for updated files and only update what has changed. This should make it suitible for syncing a collection on a cronjob
 - If there is an updated file, the old directory will be moved to `name_timestamp` where `timestamp` is the last upload time of the old files. The code will then copy unchanged files across and download any new ones.
 
+## Changelog
+* v0.4.0
+  - Added a changelog
+  - Now download associated images
+  - support `-d` to specify base download directory 
 
 ## Todo features (maybe):
+- better progress support
+- better batch mode
 - less perfunctory error checking / handling
 - attempt to use -failed dirs for resuming
-- pull down images as well
+

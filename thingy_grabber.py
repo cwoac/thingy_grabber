@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 
 URL_BASE = "https://www.thingiverse.com"
 URL_COLLECTION = URL_BASE + "/ajax/thingcollection/list_collected_things"
+USER_COLLECTION = URL_BASE + "/ajax/user/designs"
 
 ID_REGEX = re.compile(r'"id":(\d*),')
 TOTAL_REGEX = re.compile(r'"total":(\d*),')
@@ -50,9 +51,10 @@ class Grouping:
         self.req_id = None
         self.last_page = 0
         self.per_page = None
-        # These two should be set by child classes.
+        # These should be set by child classes.
         self.url = None
         self.download_dir = None
+        self.collection_url = None
 
     def _get_small_grouping(self, req):
         """ Handle small groupings """
@@ -93,7 +95,7 @@ class Grouping:
         }
         for current_page in range(1, self.last_page + 1):
             parameters['page'] = current_page
-            req = requests.post(URL_COLLECTION, parameters)
+            req = requests.post(self.collection_url, parameters)
             soup = BeautifulSoup(req.text, features='lxml')
             links = soup.find_all('a', {'class':'card-img-holder'})
             self.things += [x['href'].split(':')[1] for x in links]
@@ -114,6 +116,8 @@ class Grouping:
         except FileExistsError:
             print("Target directory {} already exists. Assuming a resume."
                   .format(self.download_dir))
+        if VERBOSE:
+            print("Downloading {} things.".format(self.total))
         for thing in self.things:
             Thing(thing).download(self.download_dir)
 
@@ -127,6 +131,7 @@ class Collection(Grouping):
             URL_BASE, self.user, strip_ws(self.name))
         self.download_dir = os.path.join(os.getcwd(),
                                          "{}-{}".format(slugify(self.user), slugify(self.name)))
+        self.collection_url = URL_COLLECTION
 
 class Designs(Grouping):
     """ Holds details of all of a users' designs. """
@@ -135,6 +140,7 @@ class Designs(Grouping):
         self.user = user
         self.url = "{}/{}/designs".format(URL_BASE, self.user)
         self.download_dir = os.path.join(os.getcwd(), "{} designs".format(slugify(self.user)))
+        self.collection_url = USER_COLLECTION
 
 class Thing:
     """ An individual design on thingiverse. """

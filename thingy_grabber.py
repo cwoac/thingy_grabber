@@ -23,6 +23,8 @@ LAST_PAGE_REGEX = re.compile(r'"last_page":(\d*),')
 PER_PAGE_REGEX = re.compile(r'"per_page":(\d*),')
 NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 
+VERSION = "0.4.0"
+
 VERBOSE = False
 
 def strip_ws(value):
@@ -317,6 +319,7 @@ def main():
     thing_parser.add_argument("thing", help="Thing ID to download")
     user_parser = subparsers.add_parser("user", help="Download all things by a user")
     user_parser.add_argument("user", help="The user to get the designs of")
+    version_parser = subparsers.add_parser("version", help="Show the current version")
 
     args = parser.parse_args()
     if not args.subcommand:
@@ -337,8 +340,8 @@ def main():
         designs = Designs(args.user, args.directory)
         print(designs.get())
         designs.download()
-
-
+    if args.subcommand == "version":
+        print("thingy_grabber.py version {}".format(VERSION))
 
 if __name__ == "__main__":
     main()

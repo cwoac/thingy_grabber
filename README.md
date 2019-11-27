@@ -3,14 +3,15 @@ Script for archiving thingiverse things. Due to this being a glorified webscrape
 
 ## Usage:
 ````
-usage: thingy_grabber.py [-h] [-v] [-d DIRECTORY] {collection,thing,user} ...
+usage: thingy_grabber.py [-h] [-v] [-d DIRECTORY] {collection,thing,user,version} ...
 
 positional arguments:
-  {collection,thing,user}
+  {collection,thing,user,version}
                         Type of thing to download
     collection          Download an entire collection
     thing               Download a single thing.
     user                Download all things by a user
+    version             Show the current version
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -22,7 +23,6 @@ optional arguments:
 ### Things
 `thingy_grabber.py thing thingid`
 This will create a directory named after the title of the thing with the given ID and download the files into it.
-
 
 ### Collections
 `thingy_grabber.py collection user_name collection_name`

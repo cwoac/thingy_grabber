@@ -24,28 +24,33 @@ LAST_PAGE_REGEX = re.compile(r'"last_page":(\d*),')
 PER_PAGE_REGEX = re.compile(r'"per_page":(\d*),')
 NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 
-VERSION = "0.4.0"
+VERSION = "0.5.1"
+
 
 def strip_ws(value):
     """ Remove whitespace from a string """
     return str(NO_WHITESPACE_REGEX.sub('-', value))
+
 
 def slugify(value):
     """
     Normalizes string, converts to lowercase, removes non-alpha characters,
     and converts spaces to hyphens.
     """
-    value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode()
+    value = unicodedata.normalize('NFKD', value).encode(
+        'ascii', 'ignore').decode()
     value = str(re.sub(r'[^\w\s-]', '', value).strip())
     value = str(NO_WHITESPACE_REGEX.sub('-', value))
     #value = str(re.sub(r'[-\s]+', '-', value))
     return value
+
 
 class Grouping:
     """ Holds details of a group of things for download
         This is effectively (although not actually) an abstract class
         - use Collection or Designs instead.
     """
+
     def __init__(self):
         self.things = []
         self.total = 0
@@ -60,7 +65,7 @@ class Grouping:
     def _get_small_grouping(self, req):
         """ Handle small groupings """
         soup = BeautifulSoup(req.text, features='lxml')
-        links = soup.find_all('a', {'class':'card-img-holder'})
+        links = soup.find_all('a', {'class': 'card-img-holder'})
         self.things = [x['href'].split(':')[1] for x in links]
         self.total = len(self.things)
 
@@ -89,16 +94,16 @@ class Grouping:
         self.last_page = int(LAST_PAGE_REGEX.search(c_req.text).groups()[0])
         self.per_page = PER_PAGE_REGEX.search(c_req.text).groups()[0]
         parameters = {
-            'base_url':self.url,
-            'page':'1',
-            'per_page':'12',
-            'id':self.req_id
+            'base_url': self.url,
+            'page': '1',
+            'per_page': '12',
+            'id': self.req_id
         }
         for current_page in range(1, self.last_page + 1):
             parameters['page'] = current_page
             req = requests.post(self.collection_url, parameters)
             soup = BeautifulSoup(req.text, features='lxml')
-            links = soup.find_all('a', {'class':'card-img-holder'})
+            links = soup.find_all('a', {'class': 'card-img-holder'})
             self.things += [x['href'].split(':')[1] for x in links]
 
         return self.things
@@ -109,21 +114,24 @@ class Grouping:
             self.get()
 
         if not self.download_dir:
-            raise ValueError("No download_dir set - invalidly initialised object?")
+            raise ValueError(
+                "No download_dir set - invalidly initialised object?")
 
         base_dir = os.getcwd()
         try:
             os.mkdir(self.download_dir)
         except FileExistsError:
             logging.info("Target directory {} already exists. Assuming a resume."
-                   .format(self.download_dir))
+                         .format(self.download_dir))
         logging.info("Downloading {} thing(s).".format(self.total))
-        for idx,thing in enumerate(self.things):
+        for idx, thing in enumerate(self.things):
             logging.info("Downloading thing {}".format(idx))
             Thing(thing).download(self.download_dir)
 
+
 class Collection(Grouping):
     """ Holds details of a collection. """
+
     def __init__(self, user, name, directory):
         Grouping.__init__(self)
         self.user = user
@@ -134,17 +142,22 @@ class Collection(Grouping):
                                          "{}-{}".format(slugify(self.user), slugify(self.name)))
         self.collection_url = URL_COLLECTION
 
+
 class Designs(Grouping):
     """ Holds details of all of a users' designs. """
+
     def __init__(self, user, directory):
         Grouping.__init__(self)
         self.user = user
         self.url = "{}/{}/designs".format(URL_BASE, self.user)
-        self.download_dir = os.path.join(directory, "{} designs".format(slugify(self.user)))
+        self.download_dir = os.path.join(
+            directory, "{} designs".format(slugify(self.user)))
         self.collection_url = USER_COLLECTION
+
 
 class Thing:
     """ An individual design on thingiverse. """
+
     def __init__(self, thing_id):
         self.thing_id = thing_id
         self.last_time = None
@@ -178,7 +191,8 @@ class Thing:
         timestamp_file = os.path.join(self.download_dir, 'timestamp.txt')
         if not os.path.exists(timestamp_file):
             # Old download from before
-            logging.warning("Old-style download directory found. Assuming update required.")
+            logging.warning(
+                "Old-style download directory found. Assuming update required.")
             self._parsed = True
             return
 
@@ -188,18 +202,21 @@ class Thing:
             logging.info("last downloaded version: {}".format(self.last_time))
         except FileNotFoundError:
             # Not run on this thing before.
-            logging.info("Old-style download directory found. Assuming update required.")
+            logging.info(
+                "Old-style download directory found. Assuming update required.")
             self.last_time = None
             self._parsed = True
             return
 
         # OK, so we have a timestamp, lets see if there is anything new to get
-        file_links = soup.find_all('a', {'class':'file-download'})
+        file_links = soup.find_all('a', {'class': 'file-download'})
         for file_link in file_links:
             timestamp = file_link.find_all('time')[0]['datetime']
-            logging.debug("Checking {} (updated {})".format(file_link["title"], timestamp))
+            logging.debug("Checking {} (updated {})".format(
+                file_link["title"], timestamp))
             if timestamp > self.last_time:
-                logging.info("Found new/updated file {}".format(file_link["title"]))
+                logging.info(
+                    "Found new/updated file {}".format(file_link["title"]))
                 self._needs_download = True
                 self._parsed = True
                 return
@@ -222,15 +239,17 @@ class Thing:
         if os.path.exists(self.download_dir):
             if not os.path.exists(timestamp_file):
                 # edge case: old style dir w/out timestamp.
-                logging.warning("Old style download dir found for {}".format(self.title))
-                os.rename(self.download_dir, "{}_old".format(self.download_dir))
+                logging.warning(
+                    "Old style download dir found for {}".format(self.title))
+                os.rename(self.download_dir,
+                          "{}_old".format(self.download_dir))
             else:
                 prev_dir = "{}_{}".format(self.download_dir, self.last_time)
                 os.rename(self.download_dir, prev_dir)
 
         # Get the list of files to download
         soup = BeautifulSoup(self.text, features='lxml')
-        file_links = soup.find_all('a', {'class':'file-download'})
+        file_links = soup.find_all('a', {'class': 'file-download'})
 
         new_file_links = []
         old_file_links = []
@@ -242,13 +261,15 @@ class Thing:
             new_last_time = file_links[0].find_all('time')[0]['datetime']
             for file_link in file_links:
                 timestamp = file_link.find_all('time')[0]['datetime']
-                logging.debug("Found file {} from {}".format(file_link["title"], timestamp))
+                logging.debug("Found file {} from {}".format(
+                    file_link["title"], timestamp))
                 if timestamp > new_last_time:
                     new_last_time = timestamp
         else:
             for file_link in file_links:
                 timestamp = file_link.find_all('time')[0]['datetime']
-                logging.debug("Checking {} (updated {})".format(file_link["title"], timestamp))
+                logging.debug("Checking {} (updated {})".format(
+                    file_link["title"], timestamp))
                 if timestamp > self.last_time:
                     new_file_links.append(file_link)
                 else:
@@ -270,16 +291,20 @@ class Thing:
                 logging.debug("Copying {} to {}".format(old_file, new_file))
                 copyfile(old_file, new_file)
             except FileNotFoundError:
-                logging.warning("Unable to find {} in old archive, redownloading".format(file_link["title"]))
+                logging.warning(
+                    "Unable to find {} in old archive, redownloading".format(file_link["title"]))
                 new_file_links.append(file_link)
 
         # Now download the new ones
-        files = [("{}{}".format(URL_BASE, x['href']), x["title"]) for x in new_file_links]
-        logging.info("Downloading {} new files of {}".format(len(new_file_links), len(file_links)))
+        files = [("{}{}".format(URL_BASE, x['href']), x["title"])
+                 for x in new_file_links]
+        logging.info("Downloading {} new files of {}".format(
+            len(new_file_links), len(file_links)))
         try:
             for url, name in files:
                 file_name = os.path.join(self.download_dir, name)
-                logging.debug("Downloading {} from {} to {}".format(name, url, file_name))
+                logging.debug("Downloading {} from {} to {}".format(
+                    name, url, file_name))
                 data_req = requests.get(url)
                 with open(file_name, 'wb') as handle:
                     handle.write(data_req.content)
@@ -290,8 +315,8 @@ class Thing:
 
         # People like images
         image_dir = os.path.join(self.download_dir, 'images')
-        imagelinks = soup.find_all('span', {'class':'gallery-slider'})[0] \
-                         .find_all('div', {'class':'gallery-photo'})
+        imagelinks = soup.find_all('span', {'class': 'gallery-slider'})[0] \
+                         .find_all('div', {'class': 'gallery-photo'})
         logging.info("Downloading {} images.".format(len(imagelinks)))
         try:
             os.mkdir(image_dir)
@@ -308,9 +333,6 @@ class Thing:
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
             return
 
-
-
-
         try:
             # Now write the timestamp
             with open(timestamp_file, 'w') as timestamp_handle:
@@ -322,6 +344,7 @@ class Thing:
         self._needs_download = False
         logging.debug("Download of {} finished".format(self.title))
 
+
 def do_batch(batch_file, download_dir):
     """ Read a file in line by line, parsing each as a set of calls to this script."""
     with open(batch_file) as handle:
@@ -330,34 +353,49 @@ def do_batch(batch_file, download_dir):
             logging.info("Handling instruction {}".format(line))
             command_arr = line.split()
             if command_arr[0] == "thing":
-                logging.debug("Handling batch thing instruction: {}".format(line))
+                logging.debug(
+                    "Handling batch thing instruction: {}".format(line))
                 Thing(command_arr[1]).download(download_dir)
                 continue
             if command_arr[0] == "collection":
-                logging.debug("Handling batch collection instruction: {}".format(line))
-                Collection(command_arr[1], command_arr[2], download_dir).download()
+                logging.debug(
+                    "Handling batch collection instruction: {}".format(line))
+                Collection(command_arr[1], command_arr[2],
+                           download_dir).download()
                 continue
             if command_arr[0] == "user":
-                logging.debug("Handling batch collection instruction: {}".format(line))
+                logging.debug(
+                    "Handling batch collection instruction: {}".format(line))
                 Designs(command_arr[1], download_dir).download()
                 continue
             logging.warning("Unable to parse current instruction. Skipping.")
 
+
 def main():
     """ Entry point for script being run as a command. """
     parser = argparse.ArgumentParser()
-    parser.add_argument("-l", "--log-level", choices=['debug','info','warning'], default='info', help="level of logging desired")
-    parser.add_argument("-d", "--directory", help="Target directory to download into")
-    subparsers = parser.add_subparsers(help="Type of thing to download", dest="subcommand")
-    collection_parser = subparsers.add_parser('collection', help="Download an entire collection")
-    collection_parser.add_argument("owner", help="The owner of the collection to get")
-    collection_parser.add_argument("collection", help="The name of the collection to get")
-    thing_parser = subparsers.add_parser('thing', help="Download a single thing.")
+    parser.add_argument("-l", "--log-level", choices=[
+                        'debug', 'info', 'warning'], default='info', help="level of logging desired")
+    parser.add_argument("-d", "--directory",
+                        help="Target directory to download into")
+    subparsers = parser.add_subparsers(
+        help="Type of thing to download", dest="subcommand")
+    collection_parser = subparsers.add_parser(
+        'collection', help="Download an entire collection")
+    collection_parser.add_argument(
+        "owner", help="The owner of the collection to get")
+    collection_parser.add_argument(
+        "collection", help="The name of the collection to get")
+    thing_parser = subparsers.add_parser(
+        'thing', help="Download a single thing.")
     thing_parser.add_argument("thing", help="Thing ID to download")
-    user_parser = subparsers.add_parser("user", help="Download all things by a user")
+    user_parser = subparsers.add_parser(
+        "user", help="Download all things by a user")
     user_parser.add_argument("user", help="The user to get the designs of")
-    batch_parser = subparsers.add_parser("batch", help="Perform multiple actions written in a text file")
-    batch_parser.add_argument("batch_file", help="The name of the file to read.")
+    batch_parser = subparsers.add_parser(
+        "batch", help="Perform multiple actions written in a text file")
+    batch_parser.add_argument(
+        "batch_file", help="The name of the file to read.")
     subparsers.add_parser("version", help="Show the current version")
 
     args = parser.parse_args()
@@ -367,7 +405,6 @@ def main():
     if not args.directory:
         args.directory = os.getcwd()
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
-
 
     if args.subcommand.startswith("collection"):
         Collection(args.owner, args.collection, args.directory).download()

@@ -322,6 +322,27 @@ class Thing:
         self._needs_download = False
         logging.debug("Download of {} finished".format(self.title))
 
+def do_batch(batch_file, download_dir):
+    """ Read a file in line by line, parsing each as a set of calls to this script."""
+    with open(batch_file) as handle:
+        for line in handle:
+            line = line.strip()
+            logging.info("Handling instruction {}".format(line))
+            command_arr = line.split()
+            if command_arr[0] == "thing":
+                logging.debug("Handling batch thing instruction: {}".format(line))
+                Thing(command_arr[1]).download(download_dir)
+                continue
+            if command_arr[0] == "collection":
+                logging.debug("Handling batch collection instruction: {}".format(line))
+                Collection(command_arr[1], command_arr[2], download_dir).download()
+                continue
+            if command_arr[0] == "user":
+                logging.debug("Handling batch collection instruction: {}".format(line))
+                Designs(command_arr[1], download_dir).download()
+                continue
+            logging.warning("Unable to parse current instruction. Skipping.")
+
 def main():
     """ Entry point for script being run as a command. """
     parser = argparse.ArgumentParser()
@@ -335,6 +356,8 @@ def main():
     thing_parser.add_argument("thing", help="Thing ID to download")
     user_parser = subparsers.add_parser("user", help="Download all things by a user")
     user_parser.add_argument("user", help="The user to get the designs of")
+    batch_parser = subparsers.add_parser("batch", help="Perform multiple actions written in a text file")
+    batch_parser.add_argument("batch_file", help="The name of the file to read.")
     subparsers.add_parser("version", help="Show the current version")
 
     args = parser.parse_args()
@@ -347,15 +370,16 @@ def main():
 
 
     if args.subcommand.startswith("collection"):
-        collection = Collection(args.owner, args.collection, args.directory)
-        collection.download()
+        Collection(args.owner, args.collection, args.directory).download()
     if args.subcommand == "thing":
         Thing(args.thing).download(args.directory)
     if args.subcommand == "user":
-        designs = Designs(args.user, args.directory)
-        designs.download()
+        Designs(args.user, args.directory).download()
     if args.subcommand == "version":
         print("thingy_grabber.py version {}".format(VERSION))
+    if args.subcommand == "batch":
+        do_batch(args.batch_file, args.directory)
+
 
 if __name__ == "__main__":
     main()

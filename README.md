@@ -3,14 +3,15 @@ Script for archiving thingiverse things. Due to this being a glorified webscrape
 
 ## Usage:
 ````
-usage: thingy_grabber.py [-h] [-l {debug,info,warning}] [-d DIRECTORY] {collection,thing,user,version} ...
+usage: thingy_grabber.py [-h] [-l {debug,info,warning}] [-d DIRECTORY] {collection,thing,user,batch,version} ...
 
 positional arguments:
-  {collection,thing,user,version}
+  {collection,thing,user,batch,version}
                         Type of thing to download
     collection          Download an entire collection
     thing               Download a single thing.
     user                Download all things by a user
+    batch               Perform multiple actions written in a text file
     version             Show the current version
 
 optional arguments:
@@ -41,6 +42,21 @@ This will create a series of directories `user designs/thing-name` for each thin
 
 If for some reason a download fails, it will get moved sideways to `thing-name-failed` - this way if you rerun it, it will only reattmpt any failed things.
 
+### Batch mode
+`thingy_grabber.py batch batch_file`
+This will load a given text file and parse it as a series of calls to this script. The script should be of the form `command arg1 ...`.
+Be warned that there is currently NO validation that you have given a correct set of commands!
+
+An example:
+````
+thing 3670144
+collection cwoac bike
+user cwoac
+````
+
+If you are using linux, you can just add an appropriate call to the crontab. If you are using windows, it's a bit more of a faff, but at least according to [https://www.technipages.com/scheduled-task-windows](this link), you should be able to with a command something like this (this is not tested!): `schtasks /create /tn thingy_grabber /tr "c:\path\to\thingy_grabber.py -d c:\path\to\output\directory batch c:\path\to\batchfile.txt" /sc weekly /d wed /st 13:00:00`
+You may have to play with the quotation marks to make that work though.
+
 ## Requirements
 python3, beautifulsoup4, requests, lxml
 
@@ -52,13 +68,15 @@ python3, beautifulsoup4, requests, lxml
 ## Changelog
 * v0.5.0
   - better logging options
+  - batch mode
 * v0.4.0
   - Added a changelog
   - Now download associated images
   - support `-d` to specify base download directory 
 
 ## Todo features (maybe):
-- better batch mode
+- log to file support
 - less perfunctory error checking / handling
 - attempt to use -failed dirs for resuming
+- gui?
 

@@ -9,6 +9,7 @@ import os
 import argparse
 import unicodedata
 import requests
+import logging
 from shutil import copyfile
 from bs4 import BeautifulSoup
 
@@ -24,8 +25,6 @@ PER_PAGE_REGEX = re.compile(r'"per_page":(\d*),')
 NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 
 VERSION = "0.4.0"
-
-VERBOSE = False
 
 def strip_ws(value):
     """ Remove whitespace from a string """
@@ -63,6 +62,7 @@ class Grouping:
         soup = BeautifulSoup(req.text, features='lxml')
         links = soup.find_all('a', {'class':'card-img-holder'})
         self.things = [x['href'].split(':')[1] for x in links]
+        self.total = len(self.things)
 
         return self.things
 
@@ -74,12 +74,11 @@ class Grouping:
 
         # Check for initialisation:
         if not self.url:
-            print("No URL set - object not initialised properly?")
+            logging.error("No URL set - object not initialised properly?")
             raise ValueError("No URL set - object not initialised properly?")
 
         # Get the internal details of the grouping.
-        if VERBOSE:
-            print("Querying {}".format(self.url))
+        logging.debug("Querying {}".format(self.url))
         c_req = requests.get(self.url)
         total = TOTAL_REGEX.search(c_req.text)
         if total is None:
@@ -116,11 +115,11 @@ class Grouping:
         try:
             os.mkdir(self.download_dir)
         except FileExistsError:
-            print("Target directory {} already exists. Assuming a resume."
-                  .format(self.download_dir))
-        if VERBOSE:
-            print("Downloading {} things.".format(self.total))
-        for thing in self.things:
+            logging.info("Target directory {} already exists. Assuming a resume."
+                   .format(self.download_dir))
+        logging.info("Downloading {} thing(s).".format(self.total))
+        for idx,thing in enumerate(self.things):
+            logging.info("Downloading thing {}".format(idx))
             Thing(thing).download(self.download_dir)
 
 class Collection(Grouping):
@@ -164,12 +163,12 @@ class Thing:
         req = requests.get(url)
         self.text = req.text
         soup = BeautifulSoup(self.text, features='lxml')
-
-        print("Found no new files for {}".format(self.title))
         #import code
         #code.interact(local=dict(globals(), **locals()))
         self.title = slugify(soup.find_all('h1')[0].text.strip())
         self.download_dir = os.path.join(base_dir, self.title)
+
+        logging.debug("Parsing {} ({})".format(self.thing_id, self.title))
 
         if not os.path.exists(self.download_dir):
             # Not yet downloaded
@@ -179,20 +178,17 @@ class Thing:
         timestamp_file = os.path.join(self.download_dir, 'timestamp.txt')
         if not os.path.exists(timestamp_file):
             # Old download from before
-            if VERBOSE:
-                print("Old-style download directory found. Assuming update required.")
+            logging.warning("Old-style download directory found. Assuming update required.")
             self._parsed = True
             return
 
         try:
             with open(timestamp_file, 'r') as timestamp_handle:
                 self.last_time = timestamp_handle.readlines()[0]
-            if VERBOSE:
-                print("last downloaded version: {}".format(self.last_time))
+            logging.info("last downloaded version: {}".format(self.last_time))
         except FileNotFoundError:
             # Not run on this thing before.
-            if VERBOSE:
-                print("Old-style download directory found. Assuming update required.")
+            logging.info("Old-style download directory found. Assuming update required.")
             self.last_time = None
             self._parsed = True
             return
@@ -201,15 +197,13 @@ class Thing:
         file_links = soup.find_all('a', {'class':'file-download'})
         for file_link in file_links:
             timestamp = file_link.find_all('time')[0]['datetime']
-            if VERBOSE:
-                print("Checking {} (updated {})".format(file_link["title"], timestamp))
+            logging.debug("Checking {} (updated {})".format(file_link["title"], timestamp))
             if timestamp > self.last_time:
-                print("Found new/updated file {}".format(file_link["title"]))
+                logging.info("Found new/updated file {}".format(file_link["title"]))
                 self._needs_download = True
                 self._parsed = True
                 return
         # Got here, so nope, no new files.
-        code.interact(local=dict(globals(), **locals()))
         self._needs_download = False
         self._parsed = True
 
@@ -219,8 +213,7 @@ class Thing:
             self._parse(base_dir)
 
         if not self._needs_download:
-            if VERBOSE:
-                print("{} already downloaded - skipping.".format(self.title))
+            print("{} already downloaded - skipping.".format(self.title))
             return
 
         # Have we already downloaded some things?
@@ -229,7 +222,7 @@ class Thing:
         if os.path.exists(self.download_dir):
             if not os.path.exists(timestamp_file):
                 # edge case: old style dir w/out timestamp.
-                print("Old style download dir found for {}".format(self.title))
+                logging.warning("Old style download dir found for {}".format(self.title))
                 os.rename(self.download_dir, "{}_old".format(self.download_dir))
             else:
                 prev_dir = "{}_{}".format(self.download_dir, self.last_time)
@@ -249,15 +242,13 @@ class Thing:
             new_last_time = file_links[0].find_all('time')[0]['datetime']
             for file_link in file_links:
                 timestamp = file_link.find_all('time')[0]['datetime']
-                if VERBOSE:
-                    print("Found file {} from {}".format(file_link["title"], timestamp))
+                logging.debug("Found file {} from {}".format(file_link["title"], timestamp))
                 if timestamp > new_last_time:
                     new_last_time = timestamp
         else:
             for file_link in file_links:
                 timestamp = file_link.find_all('time')[0]['datetime']
-                if VERBOSE:
-                    print("Checking {} (updated {})".format(file_link["title"], timestamp))
+                logging.debug("Checking {} (updated {})".format(file_link["title"], timestamp))
                 if timestamp > self.last_time:
                     new_file_links.append(file_link)
                 else:
@@ -265,44 +256,46 @@ class Thing:
                 if not new_last_time or timestamp > new_last_time:
                     new_last_time = timestamp
 
-        if VERBOSE:
-            print("new timestamp {}".format(new_last_time))
+        logging.debug("new timestamp {}".format(new_last_time))
 
         # OK. Time to get to work.
+        logging.debug("Generating download_dir")
         os.mkdir(self.download_dir)
         # First grab the cached files (if any)
+        logging.info("Copying {} unchanged files.".format(len(old_file_links)))
         for file_link in old_file_links:
             old_file = os.path.join(prev_dir, file_link["title"])
             new_file = os.path.join(self.download_dir, file_link["title"])
             try:
-                if VERBOSE:
-                    print("Copying {} to {}".format(old_file, new_file))
+                logging.debug("Copying {} to {}".format(old_file, new_file))
                 copyfile(old_file, new_file)
             except FileNotFoundError:
-                print("Unable to find {} in old archive, redownloading".format(file_link["title"]))
+                logging.warning("Unable to find {} in old archive, redownloading".format(file_link["title"]))
                 new_file_links.append(file_link)
 
         # Now download the new ones
         files = [("{}{}".format(URL_BASE, x['href']), x["title"]) for x in new_file_links]
+        logging.info("Downloading {} new files of {}".format(len(new_file_links), len(file_links)))
         try:
             for url, name in files:
                 file_name = os.path.join(self.download_dir, name)
-                if VERBOSE:
-                    print("Downloading {} from {} to {}".format(name, url, file_name))
+                logging.debug("Downloading {} from {} to {}".format(name, url, file_name))
                 data_req = requests.get(url)
                 with open(file_name, 'wb') as handle:
                     handle.write(data_req.content)
         except Exception as exception:
-            print("Failed to download {} - {}".format(name, exception))
+            logging.error("Failed to download {} - {}".format(name, exception))
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
             return
 
         # People like images
         image_dir = os.path.join(self.download_dir, 'images')
+        imagelinks = soup.find_all('span', {'class':'gallery-slider'})[0] \
+                         .find_all('div', {'class':'gallery-photo'})
+        logging.info("Downloading {} images.".format(len(imagelinks)))
         try:
             os.mkdir(image_dir)
-            for imagelink in soup.find_all('span', {'class':'gallery-slider'})[0] \
-                                 .find_all('div', {'class':'gallery-photo'}):
+            for imagelink in imagelinks:
                 url = imagelink['data-full']
                 filename = os.path.basename(url)
                 if filename.endswith('stl'):
@@ -327,13 +320,12 @@ class Thing:
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
             return
         self._needs_download = False
-        if VERBOSE:
-            print("Download of {} finished".format(self.title))
+        logging.debug("Download of {} finished".format(self.title))
 
 def main():
     """ Entry point for script being run as a command. """
     parser = argparse.ArgumentParser()
-    parser.add_argument("-v", "--verbose", help="Be more verbose", action="store_true")
+    parser.add_argument("-l", "--log-level", choices=['debug','info','warning'], default='info', help="level of logging desired")
     parser.add_argument("-d", "--directory", help="Target directory to download into")
     subparsers = parser.add_subparsers(help="Type of thing to download", dest="subcommand")
     collection_parser = subparsers.add_parser('collection', help="Download an entire collection")
@@ -351,18 +343,16 @@ def main():
         sys.exit(1)
     if not args.directory:
         args.directory = os.getcwd()
+    logging.basicConfig(level=getattr(logging, args.log_level.upper()))
 
-    global VERBOSE
-    VERBOSE = args.verbose
+
     if args.subcommand.startswith("collection"):
         collection = Collection(args.owner, args.collection, args.directory)
-        print(collection.get())
         collection.download()
     if args.subcommand == "thing":
         Thing(args.thing).download(args.directory)
     if args.subcommand == "user":
         designs = Designs(args.user, args.directory)
-        print(designs.get())
         designs.download()
     if args.subcommand == "version":
         print("thingy_grabber.py version {}".format(VERSION))

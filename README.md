@@ -3,7 +3,7 @@ Script for archiving thingiverse things. Due to this being a glorified webscrape
 
 ## Usage:
 ````
-usage: thingy_grabber.py [-h] [-v] [-d DIRECTORY] {collection,thing,user,version} ...
+usage: thingy_grabber.py [-h] [-l {debug,info,warning}] [-d DIRECTORY] {collection,thing,user,version} ...
 
 positional arguments:
   {collection,thing,user,version}
@@ -15,7 +15,8 @@ positional arguments:
 
 optional arguments:
   -h, --help            show this help message and exit
-  -v, --verbose         Be more verbose
+  -l {debug,info,warning}, --log-level {debug,info,warning}
+                        level of logging desired
   -d DIRECTORY, --directory DIRECTORY
                         Target directory to download into
 ````
@@ -49,13 +50,14 @@ python3, beautifulsoup4, requests, lxml
 - If there is an updated file, the old directory will be moved to `name_timestamp` where `timestamp` is the last upload time of the old files. The code will then copy unchanged files across and download any new ones.
 
 ## Changelog
+* v0.5.0
+  - better logging options
 * v0.4.0
   - Added a changelog
   - Now download associated images
   - support `-d` to specify base download directory 
 
 ## Todo features (maybe):
-- better progress support
 - better batch mode
 - less perfunctory error checking / handling
 - attempt to use -failed dirs for resuming

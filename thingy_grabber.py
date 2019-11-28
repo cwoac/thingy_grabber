@@ -321,7 +321,14 @@ class Thing:
         try:
             os.mkdir(image_dir)
             for imagelink in imagelinks:
-                url = imagelink['data-full']
+                url = next(filter(None,[imagelink[x] for x in ['data-full',
+                                                               'data-large',
+                                                               'data-medium',
+                                                               'data-thumb']]), None)
+                if not url:
+                    logging.warning("Unable to find any urls for {}".format(imagelink))
+                    continue
+
                 filename = os.path.basename(url)
                 if filename.endswith('stl'):
                     filename = "{}.png".format(filename)
@@ -381,17 +388,17 @@ def main():
     subparsers = parser.add_subparsers(
         help="Type of thing to download", dest="subcommand")
     collection_parser = subparsers.add_parser(
-        'collection', help="Download an entire collection")
+        'collection', help="Download one or more entire collection(s)")
     collection_parser.add_argument(
-        "owner", help="The owner of the collection to get")
+        "owner", help="The owner of the collection(s) to get")
     collection_parser.add_argument(
-        "collection", help="The name of the collection to get")
+        "collections", nargs="+",  help="Space seperated list of the name(s) of collection to get")
     thing_parser = subparsers.add_parser(
         'thing', help="Download a single thing.")
-    thing_parser.add_argument("thing", help="Thing ID to download")
+    thing_parser.add_argument("things", nargs="*", help="Space seperated list of thing ID(s) to download")
     user_parser = subparsers.add_parser(
-        "user", help="Download all things by a user")
-    user_parser.add_argument("user", help="The user to get the designs of")
+        "user",  help="Download all things by one or more users")
+    user_parser.add_argument("users", nargs="+", help="A space seperated list of the user(s) to get the designs of")
     batch_parser = subparsers.add_parser(
         "batch", help="Perform multiple actions written in a text file")
     batch_parser.add_argument(
@@ -407,11 +414,14 @@ def main():
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
 
     if args.subcommand.startswith("collection"):
-        Collection(args.owner, args.collection, args.directory).download()
+        for collection in args.collections:
+            Collection(args.owner, collection, args.directory).download()
     if args.subcommand == "thing":
-        Thing(args.thing).download(args.directory)
+        for thing in args.things:
+            Thing(thing).download(args.directory)
     if args.subcommand == "user":
-        Designs(args.user, args.directory).download()
+        for user in args.users:
+            Designs(user, args.directory).download()
     if args.subcommand == "version":
         print("thingy_grabber.py version {}".format(VERSION))
     if args.subcommand == "batch":

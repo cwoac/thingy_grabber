@@ -8,9 +8,9 @@ usage: thingy_grabber.py [-h] [-l {debug,info,warning}] [-d DIRECTORY] {collecti
 positional arguments:
   {collection,thing,user,batch,version}
                         Type of thing to download
-    collection          Download an entire collection
+    collection          Download one or more entire collection(s)
     thing               Download a single thing.
-    user                Download all things by a user
+    user                Download all things by one or more users
     batch               Perform multiple actions written in a text file
     version             Show the current version
 
@@ -23,20 +23,20 @@ optional arguments:
 ````
 
 ### Things
-`thingy_grabber.py thing thingid`
-This will create a directory named after the title of the thing with the given ID and download the files into it.
+`thingy_grabber.py thing thingid1 thingid2 ...`
+This will create a directory named after the title of the thing(s) with the given ID(s) and download the files into it.
 
 ### Collections
-`thingy_grabber.py collection user_name collection_name`
-Where `user_name` is the name of the creator of the collection (not nes. your name!) and `collection_name` is the name of the collection you want.
+`thingy_grabber.py collection user_name collection_name1 collection_name2`
+Where `user_name` is the name of the creator of the collection (not nes. your name!) and `collection_name1...etc` are the name(s) of the collection(s) you want.
 
 This will create a series of directorys `user-collection/thing-name` for each thing in the collection.
 
 If for some reason a download fails, it will get moved sideways to `thing-name-failed` - this way if you rerun it, it will only reattmpt any failed things.
 
 ### User designs
-`thingy_grabber.py user_name`
-Where `user_name` is the name of a creator.
+`thingy_grabber.py user user_name1, user_name2..`
+Where `user_name1.. ` are the names of creator.
 
 This will create a series of directories `user designs/thing-name` for each thing that user has designed.
 
@@ -57,6 +57,15 @@ user cwoac
 If you are using linux, you can just add an appropriate call to the crontab. If you are using windows, it's a bit more of a faff, but at least according to [https://www.technipages.com/scheduled-task-windows](this link), you should be able to with a command something like this (this is not tested!): `schtasks /create /tn thingy_grabber /tr "c:\path\to\thingy_grabber.py -d c:\path\to\output\directory batch c:\path\to\batchfile.txt" /sc weekly /d wed /st 13:00:00`
 You may have to play with the quotation marks to make that work though.
 
+## Examples
+`thingy_grabber.py collection cwoac bike`
+Download the collection 'bike' by the user 'cwoac'
+`thingy_grabber.py -d downloads -l warning thing 1234 4321 1232`
+Download the three things 1234, 4321 and 1232 into the directory downloads. Only give warnings.
+`thingy_grabber.py -d c:\downloads -l debug user jim bob`
+Download all designs by jim and bob into directories under `c:\downloads`, give lots of debug messages
+`
+
 ## Requirements
 python3, beautifulsoup4, requests, lxml
 
@@ -66,6 +75,8 @@ python3, beautifulsoup4, requests, lxml
 - If there is an updated file, the old directory will be moved to `name_timestamp` where `timestamp` is the last upload time of the old files. The code will then copy unchanged files across and download any new ones.
 
 ## Changelog
+* v0.6.0
+  - added support for downloading multiple things/design sets/collections from the command line
 * v0.5.0
   - better logging options
   - batch mode

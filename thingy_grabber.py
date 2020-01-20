@@ -340,6 +340,30 @@ class Thing:
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
             return
 
+        # instructions are good too.
+        logging.info("Downloading readme")
+        try:
+            readme_txt = soup.find('meta', property='og:description')['content']
+            with open(os.path.join(self.download_dir,'readme.txt'), 'w') as readme_handle:
+                readme_handle.write("{}\n".format(readme_txt))
+        except (TypeError, KeyError) as exception:
+            logging.warning("No readme? {}".format(exception))
+        except IOError as exception:
+            logging.warning("Failed to write readme! {}".format(exception))
+
+        # Best get some licenses
+        logging.info("Downloading license")
+        try:
+            license_txt = soup.find('div',{'class':'license-text'}).text
+            if license_txt:
+                with open(os.path.join(self.download_dir,'license.txt'), 'w') as license_handle:
+                    license_handle.write("{}\n".format(license_txt))
+        except AttributeError as exception:
+            logging.warning("No license? {}".format(exception))
+        except IOError as exception:
+            logging.warning("Failed to write license! {}".format(exception))
+
+
         try:
             # Now write the timestamp
             with open(timestamp_file, 'w') as timestamp_handle:

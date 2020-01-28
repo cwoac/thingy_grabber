@@ -173,28 +173,32 @@ class Thing:
 
         url = "{}/thing:{}/files".format(URL_BASE, self.thing_id)
         try:
-          req = requests.get(url)
+            req = requests.get(url)
         except requests.exceptions.ConnectionError as error:
-          logging.error("Unable to connect for thing {}: {}".format(self.thing_id, error))
-          return
+            logging.error("Unable to connect for thing {}: {}".format(
+                self.thing_id, error))
+            return
 
         self.text = req.text
         soup = BeautifulSoup(self.text, features='lxml')
         #import code
         #code.interact(local=dict(globals(), **locals()))
         try:
-          self.title = slugify(soup.find_all('h1')[0].text.strip())
+            self.title = slugify(soup.find_all('h1')[0].text.strip())
         except IndexError:
-          logging.warning("No title found for thing {}".format(self.thing_id))
-          self.title = self.thing_id
+            logging.warning(
+                "No title found for thing {}".format(self.thing_id))
+            self.title = self.thing_id
 
         if req.status_code == 404:
-          logging.warning("404 for thing {} - DMCA or invalid number?".format(self.thing_id))
-          return
+            logging.warning(
+                "404 for thing {} - DMCA or invalid number?".format(self.thing_id))
+            return
 
         if req.status_code > 299:
-          logging.warning("bad status code {}  for thing {} - try again later?".format(req.status_code, self.thing_id))
-          return
+            logging.warning(
+                "bad status code {}  for thing {} - try again later?".format(req.status_code, self.thing_id))
+            return
 
         self.download_dir = os.path.join(base_dir, self.title)
 
@@ -247,8 +251,9 @@ class Thing:
             self._parse(base_dir)
 
         if not self._parsed:
-          logging.error("Unable to parse {} - aborting download".format(self.thing_id))
-          return
+            logging.error(
+                "Unable to parse {} - aborting download".format(self.thing_id))
+            return
 
         if not self._needs_download:
             print("{} already downloaded - skipping.".format(self.title))
@@ -284,10 +289,10 @@ class Thing:
             # If we don't have anything to copy from, then it is all new.
             new_file_links = file_links
             try:
-              new_last_time = file_links[0].find_all('time')[0]['datetime']
+                new_last_time = file_links[0].find_all('time')[0]['datetime']
             except:
-              import code
-              code.interact(local=dict(globals(), **locals()))
+                import code
+                code.interact(local=dict(globals(), **locals()))
 
             for file_link in file_links:
                 timestamp = file_link.find_all('time')[0]['datetime']
@@ -351,12 +356,13 @@ class Thing:
         try:
             os.mkdir(image_dir)
             for imagelink in imagelinks:
-                url = next(filter(None,[imagelink[x] for x in ['data-full',
-                                                               'data-large',
-                                                               'data-medium',
-                                                               'data-thumb']]), None)
+                url = next(filter(None, [imagelink[x] for x in ['data-full',
+                                                                'data-large',
+                                                                'data-medium',
+                                                                'data-thumb']]), None)
                 if not url:
-                    logging.warning("Unable to find any urls for {}".format(imagelink))
+                    logging.warning(
+                        "Unable to find any urls for {}".format(imagelink))
                     continue
 
                 filename = os.path.basename(url)
@@ -373,8 +379,9 @@ class Thing:
         # instructions are good too.
         logging.info("Downloading readme")
         try:
-            readme_txt = soup.find('meta', property='og:description')['content']
-            with open(os.path.join(self.download_dir,'readme.txt'), 'w') as readme_handle:
+            readme_txt = soup.find('meta', property='og:description')[
+                'content']
+            with open(os.path.join(self.download_dir, 'readme.txt'), 'w') as readme_handle:
                 readme_handle.write("{}\n".format(readme_txt))
         except (TypeError, KeyError) as exception:
             logging.warning("No readme? {}".format(exception))
@@ -384,15 +391,14 @@ class Thing:
         # Best get some licenses
         logging.info("Downloading license")
         try:
-            license_txt = soup.find('div',{'class':'license-text'}).text
+            license_txt = soup.find('div', {'class': 'license-text'}).text
             if license_txt:
-                with open(os.path.join(self.download_dir,'license.txt'), 'w') as license_handle:
+                with open(os.path.join(self.download_dir, 'license.txt'), 'w') as license_handle:
                     license_handle.write("{}\n".format(license_txt))
         except AttributeError as exception:
             logging.warning("No license? {}".format(exception))
         except IOError as exception:
             logging.warning("Failed to write license! {}".format(exception))
-
 
         try:
             # Now write the timestamp
@@ -451,10 +457,12 @@ def main():
         "collections", nargs="+",  help="Space seperated list of the name(s) of collection to get")
     thing_parser = subparsers.add_parser(
         'thing', help="Download a single thing.")
-    thing_parser.add_argument("things", nargs="*", help="Space seperated list of thing ID(s) to download")
+    thing_parser.add_argument(
+        "things", nargs="*", help="Space seperated list of thing ID(s) to download")
     user_parser = subparsers.add_parser(
         "user",  help="Download all things by one or more users")
-    user_parser.add_argument("users", nargs="+", help="A space seperated list of the user(s) to get the designs of")
+    user_parser.add_argument(
+        "users", nargs="+", help="A space seperated list of the user(s) to get the designs of")
     batch_parser = subparsers.add_parser(
         "batch", help="Perform multiple actions written in a text file")
     batch_parser.add_argument(

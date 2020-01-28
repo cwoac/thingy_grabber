@@ -173,12 +173,30 @@ class Thing:
             return
 
         url = "{}/thing:{}/files".format(URL_BASE, self.thing_id)
-        req = requests.get(url)
+        try:
+          req = requests.get(url)
+        except requests.exceptions.ConnectionError as error:
+          logging.error("Unable to connect for thing {}: {}".format(self.thing_id, error))
+          return
+
         self.text = req.text
         soup = BeautifulSoup(self.text, features='lxml')
         #import code
         #code.interact(local=dict(globals(), **locals()))
-        self.title = slugify(soup.find_all('h1')[0].text.strip())
+        try:
+          self.title = slugify(soup.find_all('h1')[0].text.strip())
+        except IndexError:
+          logging.warning("No title found for thing {}".format(self.thing_id))
+          self.title = self.thing_id
+
+        if req.status_code == 404:
+          logging.warning("404 for thing {} - DMCA or invalid number?".format(self.thing_id))
+          return
+
+        if req.status_code > 299:
+          logging.warning("bad status code {}  for thing {} - try again later?".format(req.status_code, self.thing_id))
+          return
+
         self.download_dir = os.path.join(base_dir, self.title)
 
         logging.debug("Parsing {} ({})".format(self.thing_id, self.title))
@@ -229,6 +247,10 @@ class Thing:
         if not self._parsed:
             self._parse(base_dir)
 
+        if not self._parsed:
+          logging.error("Unable to parse {} - aborting download".format(self.thing_id))
+          return
+
         if not self._needs_download:
             print("{} already downloaded - skipping.".format(self.title))
             return
@@ -258,7 +280,12 @@ class Thing:
         if not self.last_time:
             # If we don't have anything to copy from, then it is all new.
             new_file_links = file_links
-            new_last_time = file_links[0].find_all('time')[0]['datetime']
+            try:
+              new_last_time = file_links[0].find_all('time')[0]['datetime']
+            except:
+              import code
+              code.interact(local=dict(globals(), **locals()))
+
             for file_link in file_links:
                 timestamp = file_link.find_all('time')[0]['datetime']
                 logging.debug("Found file {} from {}".format(

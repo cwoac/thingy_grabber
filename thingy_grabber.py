@@ -10,6 +10,7 @@ import argparse
 import unicodedata
 import requests
 import logging
+import multiprocessing
 from shutil import copyfile
 from bs4 import BeautifulSoup
 
@@ -24,7 +25,9 @@ LAST_PAGE_REGEX = re.compile(r'"last_page":(\d*),')
 PER_PAGE_REGEX = re.compile(r'"per_page":(\d*),')
 NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 
-VERSION = "0.5.1"
+DOWNLOADER_COUNT = 1
+
+VERSION = "0.7.0"
 
 def strip_ws(value):
     """ Remove whitespace from a string """
@@ -42,6 +45,33 @@ def slugify(value):
     value = str(NO_WHITESPACE_REGEX.sub('-', value))
     #value = str(re.sub(r'[-\s]+', '-', value))
     return value
+
+class Downloader(multiprocessing.Process):
+    """
+    Class to handle downloading the things we have found to get.
+    """
+
+    def __init__(self, thing_queue, download_directory):
+        multiprocessing.Process.__init__(self)
+        # TODO: add parameters
+        self.thing_queue = thing_queue
+        self.download_directory = download_directory
+
+    def run(self):
+        """ actual download loop.
+        """
+        while True:
+            thing_id = self.thing_queue.get()
+            if thing_id is None:
+                logging.info("Shutting download queue")
+                self.thing_queue.task_done()
+                break
+            logging.info("Handling id {}".format(thing_id))
+            Thing(thing_id).download(self.download_directory)
+            self.thing_queue.task_done()
+        return
+
+                
 
 
 class Grouping:
@@ -489,12 +519,21 @@ def main():
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
+
+    # Start downloader
+    thing_queue = multiprocessing.JoinableQueue()
+    logging.debug("starting {} downloader(s)".format(DOWNLOADER_COUNT))
+    downloaders = [Downloader(thing_queue, args.directory) for _ in range(DOWNLOADER_COUNT)]
+    for downloader in downloaders:
+        downloader.start()
+
+
     if args.subcommand.startswith("collection"):
         for collection in args.collections:
             Collection(args.owner, collection, args.directory).download()
     if args.subcommand == "thing":
         for thing in args.things:
-            Thing(thing).download(args.directory)
+            thing_queue.put(thing)
     if args.subcommand == "user":
         for user in args.users:
             Designs(user, args.directory).download()
@@ -503,6 +542,9 @@ def main():
     if args.subcommand == "batch":
         do_batch(args.batch_file, args.directory)
 
+    # Stop the downloader processes
+    for downloader in downloaders:
+        thing_queue.put(None)
 
 if __name__ == "__main__":
     main()

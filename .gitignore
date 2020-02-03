@@ -104,4 +104,4 @@ venv.bak/
 .mypy_cache/
 
 # VS Code
-.code-workspace
+*.code-workspace

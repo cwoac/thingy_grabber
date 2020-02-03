@@ -11,6 +11,7 @@ import unicodedata
 import requests
 import logging
 import multiprocessing
+import enum
 from shutil import copyfile
 from bs4 import BeautifulSoup
 
@@ -26,8 +27,15 @@ PER_PAGE_REGEX = re.compile(r'"per_page":(\d*),')
 NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 
 DOWNLOADER_COUNT = 1
+RETRY_COUNT = 3
 
 VERSION = "0.7.0"
+
+class State(enum.Enum):
+    OK = enum.auto()
+    FAILED = enum.auto()
+    ALREADY_DOWNLOADED = enum.auto()
+
 
 def strip_ws(value):
     """ Remove whitespace from a string """
@@ -71,6 +79,7 @@ class Downloader(multiprocessing.Process):
             self.thing_queue.task_done()
         return
 
+
                 
 
 
@@ -80,12 +89,14 @@ class Grouping:
         - use Collection or Designs instead.
     """
 
-    def __init__(self):
+    def __init__(self, quick):
         self.things = []
         self.total = 0
         self.req_id = None
         self.last_page = 0
         self.per_page = None
+        # Should we stop downloading when we hit a known datestamp?
+        self.quick = quick 
         # These should be set by child classes.
         self.url = None
         self.download_dir = None
@@ -155,14 +166,17 @@ class Grouping:
         logging.info("Downloading {} thing(s).".format(self.total))
         for idx, thing in enumerate(self.things):
             logging.info("Downloading thing {}".format(idx))
-            Thing(thing).download(self.download_dir)
+            RC = Thing(thing).download(self.download_dir)
+            if self.quick and RC==State.ALREADY_DOWNLOADED:
+                logging.info("Caught up, stopping.")
+                return
 
 
 class Collection(Grouping):
     """ Holds details of a collection. """
 
-    def __init__(self, user, name, directory):
-        Grouping.__init__(self)
+    def __init__(self, user, name, directory, quick):
+        Grouping.__init__(self, quick)
         self.user = user
         self.name = name
         self.url = "{}/{}/collections/{}".format(
@@ -175,8 +189,8 @@ class Collection(Grouping):
 class Designs(Grouping):
     """ Holds details of all of a users' designs. """
 
-    def __init__(self, user, directory):
-        Grouping.__init__(self)
+    def __init__(self, user, directory, quick):
+        Grouping.__init__(self, quick)
         self.user = user
         self.url = "{}/{}/designs".format(URL_BASE, self.user)
         self.download_dir = os.path.join(
@@ -276,18 +290,20 @@ class Thing:
         self._parsed = True
 
     def download(self, base_dir):
-        """ Download all files for a given thing. """
+        """ Download all files for a given thing. 
+            Returns True iff the thing is now downloaded (not iff it downloads the thing!)
+        """
         if not self._parsed:
             self._parse(base_dir)
 
         if not self._parsed:
             logging.error(
                 "Unable to parse {} - aborting download".format(self.thing_id))
-            return
+            return State.FAILED
 
         if not self._needs_download:
-            print("{} already downloaded - skipping.".format(self.title))
-            return
+            print("{} - {} already downloaded - skipping.".format(self.thing_id, self.title))
+            return State.ALREADY_DOWNLOADED
 
         # Have we already downloaded some things?
         timestamp_file = os.path.join(self.download_dir, 'timestamp.txt')
@@ -376,7 +392,7 @@ class Thing:
         except Exception as exception:
             logging.error("Failed to download {} - {}".format(name, exception))
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
-            return
+            return State.FAILED
 
         # People like images
         image_dir = os.path.join(self.download_dir, 'images')
@@ -404,7 +420,7 @@ class Thing:
         except Exception as exception:
             print("Failed to download {} - {}".format(filename, exception))
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
-            return
+            return State.FAILED
 
         # instructions are good too.
         logging.info("Downloading readme")
@@ -437,12 +453,13 @@ class Thing:
         except Exception as exception:
             print("Failed to write timestamp file - {}".format(exception))
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
-            return
+            return State.FAILED
         self._needs_download = False
         logging.debug("Download of {} finished".format(self.title))
+        return State.OK
 
 
-def do_batch(batch_file, download_dir):
+def do_batch(batch_file, download_dir, quick):
     """ Read a file in line by line, parsing each as a set of calls to this script."""
     with open(batch_file) as handle:
         for line in handle:
@@ -458,12 +475,12 @@ def do_batch(batch_file, download_dir):
                 logging.debug(
                     "Handling batch collection instruction: {}".format(line))
                 Collection(command_arr[1], command_arr[2],
-                           download_dir).download()
+                           download_dir, quick).download()
                 continue
             if command_arr[0] == "user":
                 logging.debug(
                     "Handling batch collection instruction: {}".format(line))
-                Designs(command_arr[1], download_dir).download()
+                Designs(command_arr[1], download_dir, quick).download()
                 continue
             logging.warning("Unable to parse current instruction. Skipping.")
 
@@ -477,6 +494,9 @@ def main():
                         help="Target directory to download into")
     parser.add_argument("-f", "--log-file",
                         help="Place to log debug information to")
+    parser.add_argument("-q", "--quick", action="store_true",
+                        help="Assume date ordering on posts")
+
     subparsers = parser.add_subparsers(
         help="Type of thing to download", dest="subcommand")
     collection_parser = subparsers.add_parser(
@@ -530,17 +550,17 @@ def main():
 
     if args.subcommand.startswith("collection"):
         for collection in args.collections:
-            Collection(args.owner, collection, args.directory).download()
+            Collection(args.owner, collection, args.directory, args.quick).download()
     if args.subcommand == "thing":
         for thing in args.things:
             thing_queue.put(thing)
     if args.subcommand == "user":
         for user in args.users:
-            Designs(user, args.directory).download()
+            Designs(user, args.directory, args.quick).download()
     if args.subcommand == "version":
         print("thingy_grabber.py version {}".format(VERSION))
     if args.subcommand == "batch":
-        do_batch(args.batch_file, args.directory)
+        do_batch(args.batch_file, args.directory, args.quick)
 
     # Stop the downloader processes
     for downloader in downloaders:

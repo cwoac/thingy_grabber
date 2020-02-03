@@ -77,6 +77,8 @@ python3, beautifulsoup4, requests, lxml
 - If there is an updated file, the old directory will be moved to `name_timestamp` where `timestamp` is the last upload time of the old files. The code will then copy unchanged files across and download any new ones.
 
 ## Changelog
+* v0.7.0
+  - Add new quick mode that stops once it has 'caught up' for a group
 * v0.6.3
   - Caught edge case involving old dir clashes
   - Add support for seperate log file

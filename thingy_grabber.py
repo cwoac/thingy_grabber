@@ -26,7 +26,6 @@ NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 
 VERSION = "0.5.1"
 
-
 def strip_ws(value):
     """ Remove whitespace from a string """
     return str(NO_WHITESPACE_REGEX.sub('-', value))
@@ -263,8 +262,12 @@ class Thing:
                 # edge case: old style dir w/out timestamp.
                 logging.warning(
                     "Old style download dir found for {}".format(self.title))
-                os.rename(self.download_dir,
-                          "{}_old".format(self.download_dir))
+                prev_count = 0
+                target_dir = "{}_old".format(self.download_dir)
+                while os.path.exists(target_dir):
+                    prev_count = prev_count + 1
+                    target_dir = "{}_old_{}".format(self.download_dir, prev_count)
+                os.rename(self.download_dir, target_dir)
             else:
                 prev_dir = "{}_{}".format(self.download_dir, self.last_time)
                 os.rename(self.download_dir, prev_dir)
@@ -436,6 +439,8 @@ def main():
                         'debug', 'info', 'warning'], default='info', help="level of logging desired")
     parser.add_argument("-d", "--directory",
                         help="Target directory to download into")
+    parser.add_argument("-f", "--log-file",
+                        help="Place to log debug information to")
     subparsers = parser.add_subparsers(
         help="Type of thing to download", dest="subcommand")
     collection_parser = subparsers.add_parser(
@@ -462,7 +467,19 @@ def main():
         sys.exit(1)
     if not args.directory:
         args.directory = os.getcwd()
-    logging.basicConfig(level=getattr(logging, args.log_level.upper()))
+
+    logger = logging.getLogger()
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger.setLevel(logging.DEBUG)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(args.log_level.upper())
+
+    logger.addHandler(console_handler)
+    if args.log_file:
+        file_handler = logging.FileHandler(args.log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
 
     if args.subcommand.startswith("collection"):
         for collection in args.collections:

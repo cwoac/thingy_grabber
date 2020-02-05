@@ -416,6 +416,9 @@ def do_batch(batch_file, download_dir):
     with open(batch_file) as handle:
         for line in handle:
             line = line.strip()
+            if not line:
+                # Skip empty lines
+                continue
             logging.info("Handling instruction {}".format(line))
             command_arr = line.split()
             if command_arr[0] == "thing":

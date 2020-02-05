@@ -196,14 +196,19 @@ class Thing:
           logging.warning("bad status code {}  for thing {} - try again later?".format(req.status_code, self.thing_id))
           return
 
-        self.download_dir = os.path.join(base_dir, self.title)
+        self.old_download_dir = os.path.join(base_dir, self.title)
+        self.download_dir = os.path.join(base_dir, " - ".format(self.thing_id, self.title))
 
         logging.debug("Parsing {} ({})".format(self.thing_id, self.title))
 
         if not os.path.exists(self.download_dir):
-            # Not yet downloaded
-            self._parsed = True
-            return
+            if os.path.exists(self.old_download_dir):
+                logging.info("Found previous style download directory. Moving it")
+                copyfile(self.old_download_dir, self.download_dir)
+            else:
+                # Not yet downloaded
+                self._parsed = True
+                return
 
         timestamp_file = os.path.join(self.download_dir, 'timestamp.txt')
         if not os.path.exists(timestamp_file):

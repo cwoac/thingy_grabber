@@ -197,7 +197,7 @@ class Thing:
           return
 
         self.old_download_dir = os.path.join(base_dir, self.title)
-        self.download_dir = os.path.join(base_dir, " - ".format(self.thing_id, self.title))
+        self.download_dir = os.path.join(base_dir, "{} - {}".format(self.thing_id, self.title))
 
         logging.debug("Parsing {} ({})".format(self.thing_id, self.title))
 

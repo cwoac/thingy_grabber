@@ -573,5 +573,6 @@ def main():
     for downloader in downloaders:
         thing_queue.put(None)
 
-if __name__ == "__main__":
+if __name__ == "__main__":    
+    multiprocessing.freeze_support()
     main()

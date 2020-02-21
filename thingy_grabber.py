@@ -10,6 +10,8 @@ import argparse
 import unicodedata
 import requests
 import logging
+import multiprocessing
+import enum
 from shutil import copyfile
 from bs4 import BeautifulSoup
 
@@ -24,7 +26,16 @@ LAST_PAGE_REGEX = re.compile(r'"last_page":(\d*),')
 PER_PAGE_REGEX = re.compile(r'"per_page":(\d*),')
 NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 
-VERSION = "0.5.1"
+DOWNLOADER_COUNT = 1
+RETRY_COUNT = 3
+
+VERSION = "0.7.0"
+
+class State(enum.Enum):
+    OK = enum.auto()
+    FAILED = enum.auto()
+    ALREADY_DOWNLOADED = enum.auto()
+
 
 def strip_ws(value):
     """ Remove whitespace from a string """
@@ -40,8 +51,35 @@ def slugify(value):
         'ascii', 'ignore').decode()
     value = str(re.sub(r'[^\w\s-]', '', value).strip())
     value = str(NO_WHITESPACE_REGEX.sub('-', value))
-    #value = str(re.sub(r'[-\s]+', '-', value))
     return value
+
+class Downloader(multiprocessing.Process):
+    """
+    Class to handle downloading the things we have found to get.
+    """
+
+    def __init__(self, thing_queue, download_directory):
+        multiprocessing.Process.__init__(self)
+        # TODO: add parameters
+        self.thing_queue = thing_queue
+        self.download_directory = download_directory
+
+    def run(self):
+        """ actual download loop.
+        """
+        while True:
+            thing_id = self.thing_queue.get()
+            if thing_id is None:
+                logging.info("Shutting download queue")
+                self.thing_queue.task_done()
+                break
+            logging.info("Handling id {}".format(thing_id))
+            Thing(thing_id).download(self.download_directory)
+            self.thing_queue.task_done()
+        return
+
+
+                
 
 
 class Grouping:
@@ -50,12 +88,14 @@ class Grouping:
         - use Collection or Designs instead.
     """
 
-    def __init__(self):
+    def __init__(self, quick):
         self.things = []
         self.total = 0
         self.req_id = None
         self.last_page = 0
         self.per_page = None
+        # Should we stop downloading when we hit a known datestamp?
+        self.quick = quick 
         # These should be set by child classes.
         self.url = None
         self.download_dir = None
@@ -125,14 +165,17 @@ class Grouping:
         logging.info("Downloading {} thing(s).".format(self.total))
         for idx, thing in enumerate(self.things):
             logging.info("Downloading thing {}".format(idx))
-            Thing(thing).download(self.download_dir)
+            RC = Thing(thing).download(self.download_dir)
+            if self.quick and RC==State.ALREADY_DOWNLOADED:
+                logging.info("Caught up, stopping.")
+                return
 
 
 class Collection(Grouping):
     """ Holds details of a collection. """
 
-    def __init__(self, user, name, directory):
-        Grouping.__init__(self)
+    def __init__(self, user, name, directory, quick):
+        Grouping.__init__(self, quick)
         self.user = user
         self.name = name
         self.url = "{}/{}/collections/{}".format(
@@ -145,8 +188,8 @@ class Collection(Grouping):
 class Designs(Grouping):
     """ Holds details of all of a users' designs. """
 
-    def __init__(self, user, directory):
-        Grouping.__init__(self)
+    def __init__(self, user, directory, quick):
+        Grouping.__init__(self, quick)
         self.user = user
         self.url = "{}/{}/designs".format(URL_BASE, self.user)
         self.download_dir = os.path.join(
@@ -173,28 +216,32 @@ class Thing:
 
         url = "{}/thing:{}/files".format(URL_BASE, self.thing_id)
         try:
-          req = requests.get(url)
+            req = requests.get(url)
         except requests.exceptions.ConnectionError as error:
-          logging.error("Unable to connect for thing {}: {}".format(self.thing_id, error))
-          return
+            logging.error("Unable to connect for thing {}: {}".format(
+                self.thing_id, error))
+            return
 
         self.text = req.text
         soup = BeautifulSoup(self.text, features='lxml')
         #import code
         #code.interact(local=dict(globals(), **locals()))
         try:
-          self.title = slugify(soup.find_all('h1')[0].text.strip())
+            self.title = slugify(soup.find_all('h1')[0].text.strip())
         except IndexError:
-          logging.warning("No title found for thing {}".format(self.thing_id))
-          self.title = self.thing_id
+            logging.warning(
+                "No title found for thing {}".format(self.thing_id))
+            self.title = self.thing_id
 
         if req.status_code == 404:
-          logging.warning("404 for thing {} - DMCA or invalid number?".format(self.thing_id))
-          return
+            logging.warning(
+                "404 for thing {} - DMCA or invalid number?".format(self.thing_id))
+            return
 
         if req.status_code > 299:
-          logging.warning("bad status code {}  for thing {} - try again later?".format(req.status_code, self.thing_id))
-          return
+            logging.warning(
+                "bad status code {}  for thing {} - try again later?".format(req.status_code, self.thing_id))
+            return
 
         self.old_download_dir = os.path.join(base_dir, self.title)
         self.download_dir = os.path.join(base_dir, "{} - {}".format(self.thing_id, self.title))
@@ -247,17 +294,20 @@ class Thing:
         self._parsed = True
 
     def download(self, base_dir):
-        """ Download all files for a given thing. """
+        """ Download all files for a given thing. 
+            Returns True iff the thing is now downloaded (not iff it downloads the thing!)
+        """
         if not self._parsed:
             self._parse(base_dir)
 
         if not self._parsed:
-          logging.error("Unable to parse {} - aborting download".format(self.thing_id))
-          return
+            logging.error(
+                "Unable to parse {} - aborting download".format(self.thing_id))
+            return State.FAILED
 
         if not self._needs_download:
-            print("{} already downloaded - skipping.".format(self.title))
-            return
+            print("{} - {} already downloaded - skipping.".format(self.thing_id, self.title))
+            return State.ALREADY_DOWNLOADED
 
         # Have we already downloaded some things?
         timestamp_file = os.path.join(self.download_dir, 'timestamp.txt')
@@ -274,7 +324,7 @@ class Thing:
                     target_dir = "{}_old_{}".format(self.download_dir, prev_count)
                 os.rename(self.download_dir, target_dir)
             else:
-                prev_dir = "{}_{}".format(self.download_dir, self.last_time)
+                prev_dir = "{}_{}".format(self.download_dir, slugify(self.last_time))
                 os.rename(self.download_dir, prev_dir)
 
         # Get the list of files to download
@@ -289,10 +339,10 @@ class Thing:
             # If we don't have anything to copy from, then it is all new.
             new_file_links = file_links
             try:
-              new_last_time = file_links[0].find_all('time')[0]['datetime']
+                new_last_time = file_links[0].find_all('time')[0]['datetime']
             except:
-              import code
-              code.interact(local=dict(globals(), **locals()))
+                import code
+                code.interact(local=dict(globals(), **locals()))
 
             for file_link in file_links:
                 timestamp = file_link.find_all('time')[0]['datetime']
@@ -346,7 +396,7 @@ class Thing:
         except Exception as exception:
             logging.error("Failed to download {} - {}".format(name, exception))
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
-            return
+            return State.FAILED
 
         # People like images
         image_dir = os.path.join(self.download_dir, 'images')
@@ -356,12 +406,13 @@ class Thing:
         try:
             os.mkdir(image_dir)
             for imagelink in imagelinks:
-                url = next(filter(None,[imagelink[x] for x in ['data-full',
-                                                               'data-large',
-                                                               'data-medium',
-                                                               'data-thumb']]), None)
+                url = next(filter(None, [imagelink[x] for x in ['data-full',
+                                                                'data-large',
+                                                                'data-medium',
+                                                                'data-thumb']]), None)
                 if not url:
-                    logging.warning("Unable to find any urls for {}".format(imagelink))
+                    logging.warning(
+                        "Unable to find any urls for {}".format(imagelink))
                     continue
 
                 filename = os.path.basename(url)
@@ -373,13 +424,14 @@ class Thing:
         except Exception as exception:
             print("Failed to download {} - {}".format(filename, exception))
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
-            return
+            return State.FAILED
 
         # instructions are good too.
         logging.info("Downloading readme")
         try:
-            readme_txt = soup.find('meta', property='og:description')['content']
-            with open(os.path.join(self.download_dir,'readme.txt'), 'w') as readme_handle:
+            readme_txt = soup.find('meta', property='og:description')[
+                'content']
+            with open(os.path.join(self.download_dir, 'readme.txt'), 'w') as readme_handle:
                 readme_handle.write("{}\n".format(readme_txt))
         except (TypeError, KeyError) as exception:
             logging.warning("No readme? {}".format(exception))
@@ -389,15 +441,14 @@ class Thing:
         # Best get some licenses
         logging.info("Downloading license")
         try:
-            license_txt = soup.find('div',{'class':'license-text'}).text
+            license_txt = soup.find('div', {'class': 'license-text'}).text
             if license_txt:
-                with open(os.path.join(self.download_dir,'license.txt'), 'w') as license_handle:
+                with open(os.path.join(self.download_dir, 'license.txt'), 'w') as license_handle:
                     license_handle.write("{}\n".format(license_txt))
         except AttributeError as exception:
             logging.warning("No license? {}".format(exception))
         except IOError as exception:
             logging.warning("Failed to write license! {}".format(exception))
-
 
         try:
             # Now write the timestamp
@@ -406,12 +457,13 @@ class Thing:
         except Exception as exception:
             print("Failed to write timestamp file - {}".format(exception))
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
-            return
+            return State.FAILED
         self._needs_download = False
         logging.debug("Download of {} finished".format(self.title))
+        return State.OK
 
 
-def do_batch(batch_file, download_dir):
+def do_batch(batch_file, download_dir, quick):
     """ Read a file in line by line, parsing each as a set of calls to this script."""
     with open(batch_file) as handle:
         for line in handle:
@@ -430,12 +482,12 @@ def do_batch(batch_file, download_dir):
                 logging.debug(
                     "Handling batch collection instruction: {}".format(line))
                 Collection(command_arr[1], command_arr[2],
-                           download_dir).download()
+                           download_dir, quick).download()
                 continue
             if command_arr[0] == "user":
                 logging.debug(
                     "Handling batch collection instruction: {}".format(line))
-                Designs(command_arr[1], download_dir).download()
+                Designs(command_arr[1], download_dir, quick).download()
                 continue
             logging.warning("Unable to parse current instruction. Skipping.")
 
@@ -449,6 +501,9 @@ def main():
                         help="Target directory to download into")
     parser.add_argument("-f", "--log-file",
                         help="Place to log debug information to")
+    parser.add_argument("-q", "--quick", action="store_true",
+                        help="Assume date ordering on posts")
+
     subparsers = parser.add_subparsers(
         help="Type of thing to download", dest="subcommand")
     collection_parser = subparsers.add_parser(
@@ -459,10 +514,12 @@ def main():
         "collections", nargs="+",  help="Space seperated list of the name(s) of collection to get")
     thing_parser = subparsers.add_parser(
         'thing', help="Download a single thing.")
-    thing_parser.add_argument("things", nargs="*", help="Space seperated list of thing ID(s) to download")
+    thing_parser.add_argument(
+        "things", nargs="*", help="Space seperated list of thing ID(s) to download")
     user_parser = subparsers.add_parser(
         "user",  help="Download all things by one or more users")
-    user_parser.add_argument("users", nargs="+", help="A space seperated list of the user(s) to get the designs of")
+    user_parser.add_argument(
+        "users", nargs="+", help="A space seperated list of the user(s) to get the designs of")
     batch_parser = subparsers.add_parser(
         "batch", help="Perform multiple actions written in a text file")
     batch_parser.add_argument(
@@ -489,20 +546,32 @@ def main():
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
+
+    # Start downloader
+    thing_queue = multiprocessing.JoinableQueue()
+    logging.debug("starting {} downloader(s)".format(DOWNLOADER_COUNT))
+    downloaders = [Downloader(thing_queue, args.directory) for _ in range(DOWNLOADER_COUNT)]
+    for downloader in downloaders:
+        downloader.start()
+
+
     if args.subcommand.startswith("collection"):
         for collection in args.collections:
-            Collection(args.owner, collection, args.directory).download()
+            Collection(args.owner, collection, args.directory, args.quick).download()
     if args.subcommand == "thing":
         for thing in args.things:
-            Thing(thing).download(args.directory)
+            thing_queue.put(thing)
     if args.subcommand == "user":
         for user in args.users:
-            Designs(user, args.directory).download()
+            Designs(user, args.directory, args.quick).download()
     if args.subcommand == "version":
         print("thingy_grabber.py version {}".format(VERSION))
     if args.subcommand == "batch":
-        do_batch(args.batch_file, args.directory)
+        do_batch(args.batch_file, args.directory, args.quick)
 
+    # Stop the downloader processes
+    for downloader in downloaders:
+        thing_queue.put(None)
 
 if __name__ == "__main__":
     main()

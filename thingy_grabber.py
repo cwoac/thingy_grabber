@@ -51,7 +51,6 @@ def slugify(value):
         'ascii', 'ignore').decode()
     value = str(re.sub(r'[^\w\s-]', '', value).strip())
     value = str(NO_WHITESPACE_REGEX.sub('-', value))
-    #value = str(re.sub(r'[-\s]+', '-', value))
     return value
 
 class Downloader(multiprocessing.Process):
@@ -320,7 +319,7 @@ class Thing:
                     target_dir = "{}_old_{}".format(self.download_dir, prev_count)
                 os.rename(self.download_dir, target_dir)
             else:
-                prev_dir = "{}_{}".format(self.download_dir, self.last_time)
+                prev_dir = "{}_{}".format(self.download_dir, slugify(self.last_time))
                 os.rename(self.download_dir, prev_dir)
 
         # Get the list of files to download

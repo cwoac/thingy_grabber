@@ -14,6 +14,13 @@ import multiprocessing
 import enum
 from shutil import copyfile
 from bs4 import BeautifulSoup
+from dataclasses import dataclass
+import selenium
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.firefox.options import Options
 
 URL_BASE = "https://www.thingiverse.com"
 URL_COLLECTION = URL_BASE + "/ajax/thingcollection/list_collected_things"
@@ -30,6 +37,21 @@ DOWNLOADER_COUNT = 1
 RETRY_COUNT = 3
 
 VERSION = "0.7.0"
+
+
+#BROWSER = webdriver.PhantomJS('./phantomjs')
+options = Options()
+BROWSER = webdriver.Firefox(options=options)
+
+BROWSER.set_window_size(1980, 1080)
+
+
+@dataclass
+class FileLink:
+    name: str
+    last_update: str
+    link: str
+    
 
 class State(enum.Enum):
     OK = enum.auto()
@@ -52,6 +74,47 @@ def slugify(value):
     value = str(re.sub(r'[^\w\s-]', '', value).strip())
     value = str(NO_WHITESPACE_REGEX.sub('-', value))
     return value
+
+class PageChecker(object):
+    def __init__(self):
+        self.log = []
+        self.title = None
+        self.file_count = None
+        self.files = None
+
+
+    def __call__(self, _):
+        try:
+            self.log.append("call")
+            if self.title is None:
+                # first find the name
+                name = EC._find_element(BROWSER, (By.CSS_SELECTOR, "[class^=ThingPage__modelName]"))
+                if name is None: 
+                    return False
+                self.title = name.text
+
+            if self.file_count is None:
+                # OK. Do we know how many files we have to download?
+                metrics = EC._find_elements(BROWSER, (By.CSS_SELECTOR, "[class^=MetricButton]"))
+                self.log.append("got some metrics: {}".format(len(metrics)))
+                cur_count = int([x.text.split("\n")[0] for x in metrics if x.text.endswith("\nThing Files")][0])
+                self.log.append(cur_count)
+                if cur_count == 0:
+                    return False
+                self.file_count = cur_count
+                
+            self.log.append("looking for {} files".format(self.file_count))
+            fileRows = EC._find_elements(BROWSER, (By.CSS_SELECTOR, "[class^=ThingFile__fileRow]"))
+            self.log.append("found {} files".format(len(fileRows)))
+            if len(fileRows) >= self.file_count:
+                self.files = fileRows
+                return True
+            return False
+        except Exception:
+            return False
+
+
+
 
 class Downloader(multiprocessing.Process):
     """
@@ -216,32 +279,24 @@ class Thing:
 
         url = "{}/thing:{}/files".format(URL_BASE, self.thing_id)
         try:
-            req = requests.get(url)
+            BROWSER.get(url)
+            wait = WebDriverWait(BROWSER, 20)
+            pc = PageChecker()
+            wait.until(pc)
         except requests.exceptions.ConnectionError as error:
             logging.error("Unable to connect for thing {}: {}".format(
                 self.thing_id, error))
             return
 
-        self.text = req.text
-        soup = BeautifulSoup(self.text, features='lxml')
-        #import code
-        #code.interact(local=dict(globals(), **locals()))
-        try:
-            self.title = slugify(soup.find_all('h1')[0].text.strip())
-        except IndexError:
-            logging.warning(
-                "No title found for thing {}".format(self.thing_id))
-            self.title = self.thing_id
+        self.title = pc.title
+        self._file_links=[]
+        for link in pc.files:
+            link_title, link_details, _ = link.text.split("\n")
+            #link_details we be something like '461 kb | Updated 06-11-2019 | 373 Downloads'
+            link_date = link_details.split("|")[1][10:-1]
+            link_link = link.find_element_by_xpath(".//a").get_attribute("href")
+            self._file_links.append(FileLink(link_title, link_date, link_link))
 
-        if req.status_code == 404:
-            logging.warning(
-                "404 for thing {} - DMCA or invalid number?".format(self.thing_id))
-            return
-
-        if req.status_code > 299:
-            logging.warning(
-                "bad status code {}  for thing {} - try again later?".format(req.status_code, self.thing_id))
-            return
 
         self.old_download_dir = os.path.join(base_dir, self.title)
         self.download_dir = os.path.join(base_dir, "{} - {}".format(self.thing_id, self.title))
@@ -267,28 +322,27 @@ class Thing:
 
         try:
             with open(timestamp_file, 'r') as timestamp_handle:
-                self.last_time = timestamp_handle.readlines()[0]
+                # add the .split(' ')[0] to remove the timestamp from the old style timestamps
+                self.last_time = timestamp_handle.readlines()[0].split(' ')[0]
             logging.info("last downloaded version: {}".format(self.last_time))
         except FileNotFoundError:
             # Not run on this thing before.
             logging.info(
                 "Old-style download directory found. Assuming update required.")
             self.last_time = None
+            self._needs_download = True
             self._parsed = True
             return
 
         # OK, so we have a timestamp, lets see if there is anything new to get
-        file_links = soup.find_all('a', {'class': 'file-download'})
-        for file_link in file_links:
-            timestamp = file_link.find_all('time')[0]['datetime']
-            logging.debug("Checking {} (updated {})".format(
-                file_link["title"], timestamp))
-            if timestamp > self.last_time:
+        for file_link in self._file_links:
+            if file_link.last_update > self.last_time:
                 logging.info(
                     "Found new/updated file {}".format(file_link["title"]))
                 self._needs_download = True
                 self._parsed = True
                 return
+
         # Got here, so nope, no new files.
         self._needs_download = False
         self._parsed = True
@@ -328,8 +382,6 @@ class Thing:
                 os.rename(self.download_dir, prev_dir)
 
         # Get the list of files to download
-        soup = BeautifulSoup(self.text, features='lxml')
-        file_links = soup.find_all('a', {'class': 'file-download'})
 
         new_file_links = []
         old_file_links = []
@@ -337,41 +389,44 @@ class Thing:
 
         if not self.last_time:
             # If we don't have anything to copy from, then it is all new.
-            new_file_links = file_links
-            try:
-                new_last_time = file_links[0].find_all('time')[0]['datetime']
-            except:
-                import code
-                code.interact(local=dict(globals(), **locals()))
-
-            for file_link in file_links:
-                timestamp = file_link.find_all('time')[0]['datetime']
-                logging.debug("Found file {} from {}".format(
-                    file_link["title"], timestamp))
-                if timestamp > new_last_time:
-                    new_last_time = timestamp
+            logging.debug("No last time, downloading all files")
+            new_file_links = self._file_links
+            new_last_time = new_file_links[0].last_update
+            
+            for file_link in new_file_links:
+                new_last_time = max(new_last_time, file_link.last_update)
+            logging.debug("New timestamp will be {}".format(new_last_time))
         else:
-            for file_link in file_links:
-                timestamp = file_link.find_all('time')[0]['datetime']
-                logging.debug("Checking {} (updated {})".format(
-                    file_link["title"], timestamp))
-                if timestamp > self.last_time:
+            new_last_time = self.last_time
+            for file_link in self._file_links:
+                if file_link.last_update > self.last_time:
                     new_file_links.append(file_link)
+                    new_last_time = max(new_last_time, file_link.last_update)
                 else:
                     old_file_links.append(file_link)
-                if not new_last_time or timestamp > new_last_time:
-                    new_last_time = timestamp
 
         logging.debug("new timestamp {}".format(new_last_time))
 
         # OK. Time to get to work.
         logging.debug("Generating download_dir")
         os.mkdir(self.download_dir)
+        filelist_file = os.path.join(self.download_dir, "filelist.txt")
+        with open(filelist_file, 'w') as fl_handle:
+            for fl in self._file_links:
+              base_link = fl.link
+              try:
+                fl.link=requests.get(fl.link, allow_redirects=False).headers['location']
+              except Exception e:
+                logging.warn("Unable to get actual target for {}".format(base_link))
+              
+              fl_handle.write("{},{},{}\n".format(fl.link, fl.name, fl.last_update, base_link))
+
+
         # First grab the cached files (if any)
         logging.info("Copying {} unchanged files.".format(len(old_file_links)))
         for file_link in old_file_links:
-            old_file = os.path.join(prev_dir, file_link["title"])
-            new_file = os.path.join(self.download_dir, file_link["title"])
+            old_file = os.path.join(prev_dir, file_link.name)
+            new_file = os.path.join(self.download_dir, file_link.name)
             try:
                 logging.debug("Copying {} to {}".format(old_file, new_file))
                 copyfile(old_file, new_file)
@@ -381,24 +436,24 @@ class Thing:
                 new_file_links.append(file_link)
 
         # Now download the new ones
-        files = [("{}{}".format(URL_BASE, x['href']), x["title"])
-                 for x in new_file_links]
         logging.info("Downloading {} new files of {}".format(
-            len(new_file_links), len(file_links)))
+            len(new_file_links), len(self._file_links)))
         try:
-            for url, name in files:
-                file_name = os.path.join(self.download_dir, name)
+            for file_link in new_file_links:
+                file_name = os.path.join(self.download_dir, file_link.name)
                 logging.debug("Downloading {} from {} to {}".format(
-                    name, url, file_name))
-                data_req = requests.get(url)
+                    file_link.name, file_link.link, file_name))
+                data_req = requests.get(file_link.link)
                 with open(file_name, 'wb') as handle:
                     handle.write(data_req.content)
         except Exception as exception:
-            logging.error("Failed to download {} - {}".format(name, exception))
+            logging.error("Failed to download {} - {}".format(file_link.name, exception))
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
             return State.FAILED
 
-        # People like images
+
+        """
+        # People like images. But this doesn't work yet.
         image_dir = os.path.join(self.download_dir, 'images')
         imagelinks = soup.find_all('span', {'class': 'gallery-slider'})[0] \
                          .find_all('div', {'class': 'gallery-photo'})
@@ -449,7 +504,7 @@ class Thing:
             logging.warning("No license? {}".format(exception))
         except IOError as exception:
             logging.warning("Failed to write license! {}".format(exception))
-
+        """
         try:
             # Now write the timestamp
             with open(timestamp_file, 'w') as timestamp_handle:

@@ -12,6 +12,7 @@ import requests
 import logging
 import multiprocessing
 import enum
+import datetime
 from shutil import copyfile
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
@@ -36,11 +37,12 @@ NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 DOWNLOADER_COUNT = 1
 RETRY_COUNT = 3
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 
 
 #BROWSER = webdriver.PhantomJS('./phantomjs')
 options = Options()
+options.add_argument("--headless")
 BROWSER = webdriver.Firefox(options=options)
 
 BROWSER.set_window_size(1980, 1080)
@@ -50,7 +52,7 @@ BROWSER.set_window_size(1980, 1080)
 class FileLink:
     name: str
     last_update: str
-    link: str
+    link: datetime.datetime
     
 
 class State(enum.Enum):
@@ -81,6 +83,8 @@ class PageChecker(object):
         self.title = None
         self.file_count = None
         self.files = None
+        self.images = None
+        self.license = None
 
 
     def __call__(self, _):
@@ -106,10 +110,16 @@ class PageChecker(object):
             self.log.append("looking for {} files".format(self.file_count))
             fileRows = EC._find_elements(BROWSER, (By.CSS_SELECTOR, "[class^=ThingFile__fileRow]"))
             self.log.append("found {} files".format(len(fileRows)))
-            if len(fileRows) >= self.file_count:
-                self.files = fileRows
-                return True
-            return False
+            if len(fileRows) < self.file_count:
+                return False
+
+            self.log.append("Looking for images")
+            # By this point _should_ have loaded all the images
+            self.images = EC._find_elements(BROWSER, (By.CSS_SELECTOR, "[class^=thumb]"))
+            self.license = EC._find_element(BROWSER, (By.CSS_SELECTOR, "[class^=License__licenseText]")).text
+            self.log.append("found {} images".format(len(self.images)))
+            self.files = fileRows
+            return True
         except Exception:
             return False
 
@@ -227,7 +237,7 @@ class Grouping:
                          .format(self.download_dir))
         logging.info("Downloading {} thing(s).".format(self.total))
         for idx, thing in enumerate(self.things):
-            logging.info("Downloading thing {}".format(idx))
+            logging.info("Downloading thing {} - {}".format(idx, thing))
             RC = Thing(thing).download(self.download_dir)
             if self.quick and RC==State.ALREADY_DOWNLOADED:
                 logging.info("Caught up, stopping.")
@@ -280,33 +290,55 @@ class Thing:
         url = "{}/thing:{}/files".format(URL_BASE, self.thing_id)
         try:
             BROWSER.get(url)
-            wait = WebDriverWait(BROWSER, 20)
+            wait = WebDriverWait(BROWSER, 60)
             pc = PageChecker()
             wait.until(pc)
         except requests.exceptions.ConnectionError as error:
             logging.error("Unable to connect for thing {}: {}".format(
                 self.thing_id, error))
             return
+        except selenium.common.exceptions.TimeoutException:
+            logging.error(pc.log)
+            logging.error("Timeout trying to parse thing {}".format(self.thing_id))
+            return
 
         self.title = pc.title
         self._file_links=[]
         for link in pc.files:
-            link_title, link_details, _ = link.text.split("\n")
-            #link_details we be something like '461 kb | Updated 06-11-2019 | 373 Downloads'
-            link_date = link_details.split("|")[1][10:-1]
+            logging.debug("Parsing link: {}".format(link.text))
             link_link = link.find_element_by_xpath(".//a").get_attribute("href")
-            self._file_links.append(FileLink(link_title, link_date, link_link))
+            if link_link.endswith("/zip"):
+                # bulk link.
+                continue
+            try:
+                link_title, link_details, _ = link.text.split("\n")
+            except ValueError:
+                # If it is a filetype that doesn't generate a picture, then we get an extra field at the start.
+                _, link_title, link_details, _ = link.text.split("\n")
+                
+            #link_details will be something like '461 kb | Updated 06-11-2019 | 373 Downloads'
+            #need to convert from M D Y to Y M D
+            link_date = [int(x) for x in link_details.split("|")[1][10:-1].split("-")]
+            try:
+                self._file_links.append(FileLink(link_title, datetime.datetime(link_date[2], link_date[0], link_date[1]), link_link))
+            except ValueError:
+                logging.error(link_date)
+
+        self._image_links=[x.find_element_by_xpath(".//img").get_attribute("src") for x in pc.images]
+        self._license = pc.license
+        self.pc = pc
 
 
-        self.old_download_dir = os.path.join(base_dir, self.title)
-        self.download_dir = os.path.join(base_dir, "{} - {}".format(self.thing_id, self.title))
+        self.old_download_dir = os.path.join(base_dir, slugify(self.title))
+        self.download_dir = os.path.join(base_dir, "{} - {}".format(self.thing_id, slugify(self.title)))
 
         logging.debug("Parsing {} ({})".format(self.thing_id, self.title))
 
         if not os.path.exists(self.download_dir):
+            logging.info("Looking for old dir at {}".format(self.old_download_dir))
             if os.path.exists(self.old_download_dir):
-                logging.info("Found previous style download directory. Moving it")
-                copyfile(self.old_download_dir, self.download_dir)
+                logging.warning("Found previous style download directory. Moving it from {} to {}".format(self.old_download_dir, self.download_dir))
+                os.rename(self.old_download_dir, self.download_dir)
             else:
                 # Not yet downloaded
                 self._parsed = True
@@ -323,7 +355,14 @@ class Thing:
         try:
             with open(timestamp_file, 'r') as timestamp_handle:
                 # add the .split(' ')[0] to remove the timestamp from the old style timestamps
-                self.last_time = timestamp_handle.readlines()[0].split(' ')[0]
+                last_bits = [int(x) for x in timestamp_handle.readlines()[0].split(' ')[0].split("-")]
+                logging.warning(last_bits)
+                try:
+                    self.last_time = datetime.datetime(last_bits[0], last_bits[1], last_bits[2])
+                except ValueError:
+                    # This one appears to be M D Y
+                    self.last_time = datetime.datetime(last_bits[2], last_bits[0], last_bits[1])
+
             logging.info("last downloaded version: {}".format(self.last_time))
         except FileNotFoundError:
             # Not run on this thing before.
@@ -338,7 +377,7 @@ class Thing:
         for file_link in self._file_links:
             if file_link.last_update > self.last_time:
                 logging.info(
-                    "Found new/updated file {}".format(file_link["title"]))
+                    "Found new/updated file {} - {}".format(file_link.name, file_link.last_update))
                 self._needs_download = True
                 self._parsed = True
                 return
@@ -369,8 +408,7 @@ class Thing:
         if os.path.exists(self.download_dir):
             if not os.path.exists(timestamp_file):
                 # edge case: old style dir w/out timestamp.
-                logging.warning(
-                    "Old style download dir found for {}".format(self.title))
+                logging.warning("Old style download dir found at {}".format(self.title))
                 prev_count = 0
                 target_dir = "{}_old".format(self.download_dir)
                 while os.path.exists(target_dir):
@@ -378,7 +416,7 @@ class Thing:
                     target_dir = "{}_old_{}".format(self.download_dir, prev_count)
                 os.rename(self.download_dir, target_dir)
             else:
-                prev_dir = "{}_{}".format(self.download_dir, slugify(self.last_time))
+                prev_dir = "{}_{}".format(self.download_dir, slugify(self.last_time.__str__()))
                 os.rename(self.download_dir, prev_dir)
 
         # Get the list of files to download
@@ -416,10 +454,11 @@ class Thing:
               base_link = fl.link
               try:
                 fl.link=requests.get(fl.link, allow_redirects=False).headers['location']
-              except Exception e:
-                logging.warn("Unable to get actual target for {}".format(base_link))
+              except Exception:
+                # Sometimes Thingiverse just gives us the direct link the first time. Not sure why.
+                pass
               
-              fl_handle.write("{},{},{}\n".format(fl.link, fl.name, fl.last_update, base_link))
+              fl_handle.write("{},{},{}, {}\n".format(fl.link, fl.name, fl.last_update, base_link))
 
 
         # First grab the cached files (if any)
@@ -452,28 +491,16 @@ class Thing:
             return State.FAILED
 
 
-        """
         # People like images. But this doesn't work yet.
         image_dir = os.path.join(self.download_dir, 'images')
-        imagelinks = soup.find_all('span', {'class': 'gallery-slider'})[0] \
-                         .find_all('div', {'class': 'gallery-photo'})
-        logging.info("Downloading {} images.".format(len(imagelinks)))
+        logging.info("Downloading {} images.".format(len(self._image_links)))
         try:
             os.mkdir(image_dir)
-            for imagelink in imagelinks:
-                url = next(filter(None, [imagelink[x] for x in ['data-full',
-                                                                'data-large',
-                                                                'data-medium',
-                                                                'data-thumb']]), None)
-                if not url:
-                    logging.warning(
-                        "Unable to find any urls for {}".format(imagelink))
-                    continue
-
-                filename = os.path.basename(url)
+            for imagelink in self._image_links:
+                filename = os.path.basename(imagelink)
                 if filename.endswith('stl'):
                     filename = "{}.png".format(filename)
-                image_req = requests.get(url)
+                image_req = requests.get(imagelink)
                 with open(os.path.join(image_dir, filename), 'wb') as handle:
                     handle.write(image_req.content)
         except Exception as exception:
@@ -481,6 +508,7 @@ class Thing:
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))
             return State.FAILED
 
+        """
         # instructions are good too.
         logging.info("Downloading readme")
         try:
@@ -493,22 +521,20 @@ class Thing:
         except IOError as exception:
             logging.warning("Failed to write readme! {}".format(exception))
 
+        """
         # Best get some licenses
         logging.info("Downloading license")
         try:
-            license_txt = soup.find('div', {'class': 'license-text'}).text
-            if license_txt:
+            if self._license:
                 with open(os.path.join(self.download_dir, 'license.txt'), 'w') as license_handle:
-                    license_handle.write("{}\n".format(license_txt))
-        except AttributeError as exception:
-            logging.warning("No license? {}".format(exception))
+                    license_handle.write("{}\n".format(self._license))
         except IOError as exception:
             logging.warning("Failed to write license! {}".format(exception))
-        """
+
         try:
             # Now write the timestamp
             with open(timestamp_file, 'w') as timestamp_handle:
-                timestamp_handle.write(new_last_time)
+                timestamp_handle.write(new_last_time.__str__())
         except Exception as exception:
             print("Failed to write timestamp file - {}".format(exception))
             os.rename(self.download_dir, "{}_failed".format(self.download_dir))

@@ -37,7 +37,7 @@ NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 DOWNLOADER_COUNT = 1
 RETRY_COUNT = 3
 
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 
 
 #BROWSER = webdriver.PhantomJS('./phantomjs')
@@ -318,7 +318,8 @@ class Thing:
                 
             #link_details will be something like '461 kb | Updated 06-11-2019 | 373 Downloads'
             #need to convert from M D Y to Y M D
-            link_date = [int(x) for x in link_details.split("|")[1][10:-1].split("-")]
+            link_date = [int(x) for x in link_details.split("|")[1].split()[-1].split("-")]
+            logging.error(link_details)
             try:
                 self._file_links.append(FileLink(link_title, datetime.datetime(link_date[2], link_date[0], link_date[1]), link_link))
             except ValueError:

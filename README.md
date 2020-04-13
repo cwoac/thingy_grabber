@@ -85,6 +85,8 @@ python3, beautifulsoup4, requests, lxml
 - If there is an updated file, the old directory will be moved to `name_timestamp` where `timestamp` is the last upload time of the old files. The code will then copy unchanged files across and download any new ones.
 
 ## Changelog
+* v0.8.2
+  - Strip unicode characters from filenames
 * v0.8.1
   - Fix bug on when all files were created / updated in October after the 9th.
 * v0.8.0

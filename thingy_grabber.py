@@ -37,7 +37,7 @@ NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 DOWNLOADER_COUNT = 1
 RETRY_COUNT = 3
 
-VERSION = "0.8.1"
+VERSION = "0.8.2"
 
 
 #BROWSER = webdriver.PhantomJS('./phantomjs')
@@ -66,15 +66,22 @@ def strip_ws(value):
     return str(NO_WHITESPACE_REGEX.sub('-', value))
 
 
+def strip_invalid_chars(value):
+    """
+    Normalizes string, converts to lowercase, removes non-alpha characters.
+    """
+    return unicodedata.normalize('NFKD', value).encode(
+        'ascii', 'ignore').decode()
+
+
 def slugify(value):
     """
     Normalizes string, converts to lowercase, removes non-alpha characters,
     and converts spaces to hyphens.
     """
-    value = unicodedata.normalize('NFKD', value).encode(
-        'ascii', 'ignore').decode()
+    value = strip_invalid_chars(value)
     value = str(re.sub(r'[^\w\s-]', '', value).strip())
-    value = str(NO_WHITESPACE_REGEX.sub('-', value))
+    value = strip_ws(value)
     return value
 
 class PageChecker(object):
@@ -319,9 +326,8 @@ class Thing:
             #link_details will be something like '461 kb | Updated 06-11-2019 | 373 Downloads'
             #need to convert from M D Y to Y M D
             link_date = [int(x) for x in link_details.split("|")[1].split()[-1].split("-")]
-            logging.error(link_details)
             try:
-                self._file_links.append(FileLink(link_title, datetime.datetime(link_date[2], link_date[0], link_date[1]), link_link))
+                self._file_links.append(FileLink(strip_invalid_chars(link_title), datetime.datetime(link_date[2], link_date[0], link_date[1]), link_link))
             except ValueError:
                 logging.error(link_date)
 

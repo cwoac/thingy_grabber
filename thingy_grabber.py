@@ -22,6 +22,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.firefox.options import Options
+import atexit
 
 URL_BASE = "https://www.thingiverse.com"
 URL_COLLECTION = URL_BASE + "/ajax/thingcollection/list_collected_things"
@@ -37,7 +38,7 @@ NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 DOWNLOADER_COUNT = 1
 RETRY_COUNT = 3
 
-VERSION = "0.8.3"
+VERSION = "0.8.4"
 
 
 #BROWSER = webdriver.PhantomJS('./phantomjs')
@@ -66,23 +67,14 @@ def strip_ws(value):
     return str(NO_WHITESPACE_REGEX.sub('-', value))
 
 
-def strip_invalid_chars(value):
-    """
-    Normalizes string, converts to lowercase, removes non-alpha characters.
-    """
-    return unicodedata.normalize('NFKD', value).encode(
-        'ascii', 'ignore').decode()
-
 
 def slugify(value):
     """
-    Normalizes string, converts to lowercase, removes non-alpha characters,
-    and converts spaces to hyphens.
+    Normalise string, removes invalid for filename charactersr
+    and converts string to lowercase.
     """
-    value = strip_invalid_chars(value)
-    value = str(re.sub(r'[^\w\s-]', '', value).strip())
-    value = strip_ws(value)
-    return value
+    value = unicodedata.normalize('NFKC', value).lower().strip()
+    return re.sub(r'[\\/<>:\?\*\|"]', '', value)
 
 class PageChecker(object):
     def __init__(self):
@@ -327,12 +319,12 @@ class Thing:
             #need to convert from M D Y to Y M D
             link_date = [int(x) for x in link_details.split("|")[1].split()[-1].split("-")]
             try:
-                self._file_links.append(FileLink(strip_invalid_chars(link_title), datetime.datetime(link_date[2], link_date[0], link_date[1]), link_link))
+                self._file_links.append(FileLink(link_title, datetime.datetime(link_date[2], link_date[0], link_date[1]), link_link))
             except ValueError:
                 logging.error(link_date)
 
         self._image_links=[x.find_element_by_xpath(".//img").get_attribute("src") for x in pc.images]
-        self._license = strip_invalid_chars(pc.license)
+        self._license = pc.license
         self.pc = pc
 
 
@@ -456,7 +448,7 @@ class Thing:
         logging.debug("Generating download_dir")
         os.mkdir(self.download_dir)
         filelist_file = os.path.join(self.download_dir, "filelist.txt")
-        with open(filelist_file, 'w') as fl_handle:
+        with open(filelist_file, 'w', encoding="utf-8") as fl_handle:
             for fl in self._file_links:
               base_link = fl.link
               try:
@@ -533,14 +525,14 @@ class Thing:
         logging.info("Downloading license")
         try:
             if self._license:
-                with open(os.path.join(self.download_dir, 'license.txt'), 'w') as license_handle:
+                with open(os.path.join(self.download_dir, 'license.txt'), 'w', encoding="utf-8") as license_handle:
                     license_handle.write("{}\n".format(self._license))
         except IOError as exception:
             logging.warning("Failed to write license! {}".format(exception))
 
         try:
             # Now write the timestamp
-            with open(timestamp_file, 'w') as timestamp_handle:
+            with open(timestamp_file, 'w', encoding="utf-8") as timestamp_handle:
                 timestamp_handle.write(new_last_time.__str__())
         except Exception as exception:
             print("Failed to write timestamp file - {}".format(exception))
@@ -660,6 +652,8 @@ def main():
     # Stop the downloader processes
     for downloader in downloaders:
         thing_queue.put(None)
+
+atexit.register(BROWSER.quit)
 
 if __name__ == "__main__":    
     multiprocessing.freeze_support()

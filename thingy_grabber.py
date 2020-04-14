@@ -37,7 +37,7 @@ NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 DOWNLOADER_COUNT = 1
 RETRY_COUNT = 3
 
-VERSION = "0.8.2"
+VERSION = "0.8.3"
 
 
 #BROWSER = webdriver.PhantomJS('./phantomjs')
@@ -332,7 +332,7 @@ class Thing:
                 logging.error(link_date)
 
         self._image_links=[x.find_element_by_xpath(".//img").get_attribute("src") for x in pc.images]
-        self._license = pc.license
+        self._license = strip_invalid_chars(pc.license)
         self.pc = pc
 
 

@@ -38,7 +38,9 @@ NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
 DOWNLOADER_COUNT = 1
 RETRY_COUNT = 3
 
-VERSION = "0.8.4"
+MAX_PATH_LENGTH = 250
+
+VERSION = "0.8.5"
 
 
 #BROWSER = webdriver.PhantomJS('./phantomjs')
@@ -62,10 +64,36 @@ class State(enum.Enum):
     ALREADY_DOWNLOADED = enum.auto()
 
 
+def fail_dir(dir_name):
+    """ When a download has failed, move it sideways.
+    """
+    target_dir = "{}_failed".format(dir_name)
+    inc = 0
+    while os.path.exists(target_dir):
+      target_dir = "{}_failed_{}".format(dir_name, inc)
+      inc += 1
+    os.rename(dir_name, target_dir)
+
+
+def truncate_name(file_name):
+    """ Ensure the filename is not too long for, well windows basically.
+    """
+    path = os.path.abspath(file_name)
+    if len(path) <= MAX_PATH_LENGTH:
+        return path
+    to_cut = len(path) - (MAX_PATH_LENGTH + 3)
+    base, extension = os.path.splitext(path)
+    inc = 0
+    new_path = "{}_{}{}".format(base, inc, extension)
+    while os.path.exists(new_path):
+        new_path = "{}_{}{}".format(base, inc, extension)
+        inc += 1
+    return new_path
+
+
 def strip_ws(value):
     """ Remove whitespace from a string """
     return str(NO_WHITESPACE_REGEX.sub('-', value))
-
 
 
 def slugify(value):
@@ -74,7 +102,9 @@ def slugify(value):
     and converts string to lowercase.
     """
     value = unicodedata.normalize('NFKC', value).lower().strip()
-    return re.sub(r'[\\/<>:\?\*\|"]', '', value)
+    value = re.sub(r'[\\/<>:\?\*\|"]', '', value)
+    value = re.sub(r'\.*$', '', value)
+    return value
 
 class PageChecker(object):
     def __init__(self):
@@ -464,7 +494,7 @@ class Thing:
         logging.info("Copying {} unchanged files.".format(len(old_file_links)))
         for file_link in old_file_links:
             old_file = os.path.join(prev_dir, file_link.name)
-            new_file = os.path.join(self.download_dir, file_link.name)
+            new_file = truncate_name(os.path.join(self.download_dir, file_link.name))
             try:
                 logging.debug("Copying {} to {}".format(old_file, new_file))
                 copyfile(old_file, new_file)
@@ -478,7 +508,7 @@ class Thing:
             len(new_file_links), len(self._file_links)))
         try:
             for file_link in new_file_links:
-                file_name = os.path.join(self.download_dir, file_link.name)
+                file_name = truncate_name(os.path.join(self.download_dir, file_link.name))
                 logging.debug("Downloading {} from {} to {}".format(
                     file_link.name, file_link.link, file_name))
                 data_req = requests.get(file_link.link)
@@ -486,7 +516,7 @@ class Thing:
                     handle.write(data_req.content)
         except Exception as exception:
             logging.error("Failed to download {} - {}".format(file_link.name, exception))
-            os.rename(self.download_dir, "{}_failed".format(self.download_dir))
+            fail_dir(self.download_dir)
             return State.FAILED
 
 
@@ -500,11 +530,11 @@ class Thing:
                 if filename.endswith('stl'):
                     filename = "{}.png".format(filename)
                 image_req = requests.get(imagelink)
-                with open(os.path.join(image_dir, filename), 'wb') as handle:
+                with open(truncate_name(os.path.join(image_dir, filename)), 'wb') as handle:
                     handle.write(image_req.content)
         except Exception as exception:
             print("Failed to download {} - {}".format(filename, exception))
-            os.rename(self.download_dir, "{}_failed".format(self.download_dir))
+            fail_dir(self.download_dir)
             return State.FAILED
 
         """
@@ -525,7 +555,7 @@ class Thing:
         logging.info("Downloading license")
         try:
             if self._license:
-                with open(os.path.join(self.download_dir, 'license.txt'), 'w', encoding="utf-8") as license_handle:
+                with open(truncate_name(os.path.join(self.download_dir, 'license.txt')), 'w', encoding="utf-8") as license_handle:
                     license_handle.write("{}\n".format(self._license))
         except IOError as exception:
             logging.warning("Failed to write license! {}".format(exception))
@@ -536,7 +566,7 @@ class Thing:
                 timestamp_handle.write(new_last_time.__str__())
         except Exception as exception:
             print("Failed to write timestamp file - {}".format(exception))
-            os.rename(self.download_dir, "{}_failed".format(self.download_dir))
+            fail_dir(self.download_dir)
             return State.FAILED
         self._needs_download = False
         logging.debug("Download of {} finished".format(self.title))

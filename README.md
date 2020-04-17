@@ -85,6 +85,10 @@ python3, beautifulsoup4, requests, lxml
 - If there is an updated file, the old directory will be moved to `name_timestamp` where `timestamp` is the last upload time of the old files. The code will then copy unchanged files across and download any new ones.
 
 ## Changelog
+* v0.8.5
+  - Strip '.'s from the end of filenames
+  - If you fail a download for an already failed download it no longer throws an exception
+  - Truncates paths that are too long for windows
 * v0.8.4
   - Just use unicode filenames - puts the unicode characters back in!
   - Force selenium to shutdown firefox on assert and normal exit

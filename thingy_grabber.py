@@ -40,7 +40,7 @@ RETRY_COUNT = 3
 
 MAX_PATH_LENGTH = 250
 
-VERSION = "0.8.5"
+VERSION = "0.8.6"
 
 
 #BROWSER = webdriver.PhantomJS('./phantomjs')
@@ -333,6 +333,8 @@ class Thing:
 
         self.title = pc.title
         self._file_links=[]
+        if not pc.files:
+            logging.error("No files found for thing {} - probably thingiverse being broken, try again later".format(self.thing_id))
         for link in pc.files:
             logging.debug("Parsing link: {}".format(link.text))
             link_link = link.find_element_by_xpath(".//a").get_attribute("href")
@@ -430,6 +432,10 @@ class Thing:
         if not self._needs_download:
             print("{} - {} already downloaded - skipping.".format(self.thing_id, self.title))
             return State.ALREADY_DOWNLOADED
+
+        if not self._file_links:
+            print("{} - {} appears to have no files. Thingiverse acting up again?".format(self.thing_id, self.title))
+            return State.FAILED
 
         # Have we already downloaded some things?
         timestamp_file = os.path.join(self.download_dir, 'timestamp.txt')

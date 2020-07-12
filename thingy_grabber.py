@@ -23,6 +23,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.firefox.options import Options
 import atexit
+import py7zr
 
 URL_BASE = "https://www.thingiverse.com"
 URL_COLLECTION = URL_BASE + "/ajax/thingcollection/list_collected_things"
@@ -40,7 +41,7 @@ RETRY_COUNT = 3
 
 MAX_PATH_LENGTH = 250
 
-VERSION = "0.8.6"
+VERSION = "0.8.7"
 
 
 #BROWSER = webdriver.PhantomJS('./phantomjs')
@@ -388,6 +389,12 @@ class Thing:
                 # add the .split(' ')[0] to remove the timestamp from the old style timestamps
                 last_bits = [int(x) for x in timestamp_handle.readlines()[0].split(' ')[0].split("-")]
                 logging.warning(last_bits)
+                if last_bits[0] == 0:
+                    last_bits[0] = 1
+                if last_bits[1] == 0:
+                    last_bits[1] = 1
+                if last_bits[2] == 0:
+                    last_bits[2] = 1980
                 try:
                     self.last_time = datetime.datetime(last_bits[0], last_bits[1], last_bits[2])
                 except ValueError:

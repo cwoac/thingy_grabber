@@ -25,6 +25,8 @@ from selenium.webdriver.firefox.options import Options
 import atexit
 import py7zr
 
+SEVENZIP_FILTERS = [{'id': py7zr.FILTER_LZMA2}]
+
 URL_BASE = "https://www.thingiverse.com"
 URL_COLLECTION = URL_BASE + "/ajax/thingcollection/list_collected_things"
 USER_COLLECTION = URL_BASE + "/ajax/user/designs"
@@ -41,7 +43,7 @@ RETRY_COUNT = 3
 
 MAX_PATH_LENGTH = 250
 
-VERSION = "0.8.7"
+VERSION = "0.9.0"
 
 
 #BROWSER = webdriver.PhantomJS('./phantomjs')
@@ -55,8 +57,31 @@ BROWSER.set_window_size(1980, 1080)
 @dataclass
 class FileLink:
     name: str
-    last_update: str
-    link: datetime.datetime
+    last_update: datetime.datetime
+    link: str
+
+class FileLinks:
+    def __init__(self, initial_links=[]):
+        self.links = []
+        self.last_update = None
+        for link in initial_links: 
+            self.append(link)
+
+    def __iter__(self):
+        return iter(self.links)
+
+    def __getitem__(self, item):
+        return self.links[item]
+
+    def __len__(self):
+        return len(self.links)
+
+    def append(self, link):
+        try:
+            self.last_update = max(self.last_update, link.last_update)
+        except TypeError:
+            self.last_update = link.last_update
+        self.links.append(link)
     
 
 class State(enum.Enum):
@@ -161,11 +186,12 @@ class Downloader(multiprocessing.Process):
     Class to handle downloading the things we have found to get.
     """
 
-    def __init__(self, thing_queue, download_directory):
+    def __init__(self, thing_queue, download_directory, compress):
         multiprocessing.Process.__init__(self)
         # TODO: add parameters
         self.thing_queue = thing_queue
         self.download_directory = download_directory
+        self.compress = compress
 
     def run(self):
         """ actual download loop.
@@ -177,7 +203,7 @@ class Downloader(multiprocessing.Process):
                 self.thing_queue.task_done()
                 break
             logging.info("Handling id {}".format(thing_id))
-            Thing(thing_id).download(self.download_directory)
+            Thing(thing_id).download(self.download_directory, self.compress)
             self.thing_queue.task_done()
         return
 
@@ -191,7 +217,7 @@ class Grouping:
         - use Collection or Designs instead.
     """
 
-    def __init__(self, quick):
+    def __init__(self, quick, compress):
         self.things = []
         self.total = 0
         self.req_id = None
@@ -199,6 +225,7 @@ class Grouping:
         self.per_page = None
         # Should we stop downloading when we hit a known datestamp?
         self.quick = quick 
+        self.compress = compress
         # These should be set by child classes.
         self.url = None
         self.download_dir = None
@@ -268,17 +295,20 @@ class Grouping:
         logging.info("Downloading {} thing(s).".format(self.total))
         for idx, thing in enumerate(self.things):
             logging.info("Downloading thing {} - {}".format(idx, thing))
-            RC = Thing(thing).download(self.download_dir)
+            RC = Thing(thing).download(self.download_dir, self.compress)
             if self.quick and RC==State.ALREADY_DOWNLOADED:
                 logging.info("Caught up, stopping.")
                 return
 
 
+
+
+
 class Collection(Grouping):
     """ Holds details of a collection. """
 
-    def __init__(self, user, name, directory, quick):
-        Grouping.__init__(self, quick)
+    def __init__(self, user, name, directory, quick, compress):
+        Grouping.__init__(self, quick, compress)
         self.user = user
         self.name = name
         self.url = "{}/{}/collections/{}".format(
@@ -291,8 +321,8 @@ class Collection(Grouping):
 class Designs(Grouping):
     """ Holds details of all of a users' designs. """
 
-    def __init__(self, user, directory, quick):
-        Grouping.__init__(self, quick)
+    def __init__(self, user, directory, quick, compress):
+        Grouping.__init__(self, quick, compress)
         self.user = user
         self.url = "{}/{}/designs".format(URL_BASE, self.user)
         self.download_dir = os.path.join(
@@ -311,6 +341,8 @@ class Thing:
         self.text = None
         self.title = None
         self.download_dir = None
+        self.time_stamp = None
+        self._file_links = FileLinks()
 
     def _parse(self, base_dir):
         """ Work out what, if anything needs to be done. """
@@ -333,7 +365,6 @@ class Thing:
             return
 
         self.title = pc.title
-        self._file_links=[]
         if not pc.files:
             logging.error("No files found for thing {} - probably thingiverse being broken, try again later".format(self.thing_id))
         for link in pc.files:
@@ -412,19 +443,21 @@ class Thing:
             return
 
         # OK, so we have a timestamp, lets see if there is anything new to get
-        for file_link in self._file_links:
-            if file_link.last_update > self.last_time:
+        try:
+            if self._file_links.last_update > self.last_time:
                 logging.info(
-                    "Found new/updated file {} - {}".format(file_link.name, file_link.last_update))
+                    "Found new/updated files {}".format(self._file_links.last_update))
                 self._needs_download = True
                 self._parsed = True
                 return
+        except TypeError:
+            logging.warning("No files found for {}.".format(self.thing_id))
 
         # Got here, so nope, no new files.
         self._needs_download = False
         self._parsed = True
 
-    def download(self, base_dir):
+    def download(self, base_dir, compress):
         """ Download all files for a given thing. 
             Returns True iff the thing is now downloaded (not iff it downloads the thing!)
         """
@@ -465,27 +498,27 @@ class Thing:
 
         new_file_links = []
         old_file_links = []
-        new_last_time = None
+        self.time_stamp = None
 
         if not self.last_time:
             # If we don't have anything to copy from, then it is all new.
             logging.debug("No last time, downloading all files")
             new_file_links = self._file_links
-            new_last_time = new_file_links[0].last_update
+            self.time_stamp = new_file_links[0].last_update
             
             for file_link in new_file_links:
-                new_last_time = max(new_last_time, file_link.last_update)
-            logging.debug("New timestamp will be {}".format(new_last_time))
+                self.time_stamp = max(self.time_stamp, file_link.last_update)
+            logging.debug("New timestamp will be {}".format(self.time_stamp))
         else:
-            new_last_time = self.last_time
+            self.time_stamp = self.last_time
             for file_link in self._file_links:
                 if file_link.last_update > self.last_time:
                     new_file_links.append(file_link)
-                    new_last_time = max(new_last_time, file_link.last_update)
+                    self.time_stamp = max(self.time_stamp, file_link.last_update)
                 else:
                     old_file_links.append(file_link)
 
-        logging.debug("new timestamp {}".format(new_last_time))
+        logging.debug("new timestamp {}".format(self.time_stamp))
 
         # OK. Time to get to work.
         logging.debug("Generating download_dir")
@@ -576,17 +609,36 @@ class Thing:
         try:
             # Now write the timestamp
             with open(timestamp_file, 'w', encoding="utf-8") as timestamp_handle:
-                timestamp_handle.write(new_last_time.__str__())
+                timestamp_handle.write(self.time_stamp.__str__())
         except Exception as exception:
             print("Failed to write timestamp file - {}".format(exception))
             fail_dir(self.download_dir)
             return State.FAILED
         self._needs_download = False
         logging.debug("Download of {} finished".format(self.title))
+        if not compress:
+            return State.OK
+
+
+        thing_dir = "{} - {} - {}".format(self.thing_id,
+            slugify(self.title),
+            self.time_stamp)
+        file_name = os.path.join(base_dir,
+            "{}.7z".format(thing_dir))
+        logging.debug("Compressing {} to {}".format(
+            self.title,
+            file_name))
+        #with libarchive.file_writer(filename, 'lzma', '7z') as archive:
+        with py7zr.SevenZipFile(file_name, 'w', filters=SEVENZIP_FILTERS) as archive:
+        #with py7zr.SevenZipFile(file_name, 'w' ) as archive:
+            archive.writeall(self.download_dir, thing_dir)
+        logging.debug("Compression of {} finished.".format(self.title))
         return State.OK
 
 
-def do_batch(batch_file, download_dir, quick):
+
+
+def do_batch(batch_file, download_dir, quick, compress):
     """ Read a file in line by line, parsing each as a set of calls to this script."""
     with open(batch_file) as handle:
         for line in handle:
@@ -599,18 +651,18 @@ def do_batch(batch_file, download_dir, quick):
             if command_arr[0] == "thing":
                 logging.debug(
                     "Handling batch thing instruction: {}".format(line))
-                Thing(command_arr[1]).download(download_dir)
+                Thing(command_arr[1]).download(download_dir, compress)
                 continue
             if command_arr[0] == "collection":
                 logging.debug(
                     "Handling batch collection instruction: {}".format(line))
                 Collection(command_arr[1], command_arr[2],
-                           download_dir, quick).download()
+                           download_dir, quick, compress).download()
                 continue
             if command_arr[0] == "user":
                 logging.debug(
                     "Handling batch collection instruction: {}".format(line))
-                Designs(command_arr[1], download_dir, quick).download()
+                Designs(command_arr[1], download_dir, quick, compress).download()
                 continue
             logging.warning("Unable to parse current instruction. Skipping.")
 
@@ -626,6 +678,9 @@ def main():
                         help="Place to log debug information to")
     parser.add_argument("-q", "--quick", action="store_true",
                         help="Assume date ordering on posts")
+    parser.add_argument("-c", "--compress", action="store_true",
+                        help="Compress files")
+                        
 
     subparsers = parser.add_subparsers(
         help="Type of thing to download", dest="subcommand")
@@ -673,24 +728,24 @@ def main():
     # Start downloader
     thing_queue = multiprocessing.JoinableQueue()
     logging.debug("starting {} downloader(s)".format(DOWNLOADER_COUNT))
-    downloaders = [Downloader(thing_queue, args.directory) for _ in range(DOWNLOADER_COUNT)]
+    downloaders = [Downloader(thing_queue, args.directory, args.compress) for _ in range(DOWNLOADER_COUNT)]
     for downloader in downloaders:
         downloader.start()
 
 
     if args.subcommand.startswith("collection"):
         for collection in args.collections:
-            Collection(args.owner, collection, args.directory, args.quick).download()
+            Collection(args.owner, collection, args.directory, args.quick, args.compress).download()
     if args.subcommand == "thing":
         for thing in args.things:
             thing_queue.put(thing)
     if args.subcommand == "user":
         for user in args.users:
-            Designs(user, args.directory, args.quick).download()
+            Designs(user, args.directory, args.quick, args.compress).download()
     if args.subcommand == "version":
         print("thingy_grabber.py version {}".format(VERSION))
     if args.subcommand == "batch":
-        do_batch(args.batch_file, args.directory, args.quick)
+        do_batch(args.batch_file, args.directory, args.quick, args.compress)
 
     # Stop the downloader processes
     for downloader in downloaders:

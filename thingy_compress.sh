@@ -7,7 +7,7 @@ then
     exit 1
 fi
 
-timestamp=$(cat "$sourcefile/timestamp.txt")
+timestamp=$(echo $(cat "$sourcefile/timestamp.txt") | sed 's/:/./g')
 
 if [ -z "$timestamp" ]
 then

@@ -31,6 +31,8 @@ SEVENZIP_FILTERS = [{'id': py7zr.FILTER_LZMA2}]
 
 # I don't think this is exported by datetime
 DEFAULT_DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S'
+# Windows cannot handle : in filenames
+SAFE_DATETIME_FORMAT = '%Y-%m-%d %H.%M.%S'
 
 URL_BASE = "https://www.thingiverse.com"
 URL_COLLECTION = URL_BASE + "/ajax/thingcollection/list_collected_things"
@@ -454,7 +456,7 @@ class Thing:
             # Old form of download directory
             target_dir_name = "{} - old".format(self.download_dir)
         else:
-            target_dir_name = "{} - {}".format(self.download_dir, slugify(self.last_time.__str__()))
+            target_dir_name = "{} - {}".format(self.download_dir, self.last_time.strftime(SAFE_DATETIME_FORMAT))
         return rename_unique(self.download_dir, target_dir_name)
 
     def _find_last_download(self, base_dir):
@@ -491,7 +493,7 @@ class Thing:
             candidate = os.path.basename(path)
             try:
                 logging.debug("Examining '{}' - '{}'".format(candidate, candidate[leading_length:-3]))
-                candidate_time = datetime.datetime.strptime(candidate[leading_length:-3], DEFAULT_DATETIME_FORMAT)
+                candidate_time = datetime.datetime.strptime(candidate[leading_length:-3], SAFE_DATETIME_FORMAT)
             except ValueError:
                 logging.warning("There was an error finding the date in {}. Ignoring.".format(candidate))
                 continue
@@ -658,7 +660,7 @@ class Thing:
 
         thing_dir = "{} - {} - {}".format(self.thing_id,
             slugify(self.title),
-            self.time_stamp)
+            self.time_stamp.strftime(SAFE_DATETIME_FORMAT))
         file_name = os.path.join(base_dir,
             "{}.7z".format(thing_dir))
         logging.debug("Compressing {} to {}".format(

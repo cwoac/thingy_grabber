@@ -3,7 +3,7 @@ Script for archiving thingiverse things. Due to this being a glorified webscrape
 
 ## Usage:
 ````
-usage: thingy_grabber.py [-h] [-l {debug,info,warning}] [-d DIRECTORY] [-f LOG_FILE] [-q] {collection,thing,user,batch,version} ...
+usage: thingy_grabber.py [-h] [-l {debug,info,warning}] [-d DIRECTORY] [-f LOG_FILE] [-q] [-c] {collection,thing,user,batch,version} ...
 
 positional arguments:
   {collection,thing,user,batch,version}
@@ -23,6 +23,7 @@ optional arguments:
   -f LOG_FILE, --log-file LOG_FILE
                         Place to log debug information to
   -q, --quick           Assume date ordering on posts
+  -c, --compress        Compress files
 ````
 
 ### Things
@@ -77,7 +78,7 @@ Download all designs by jim and bob into directories under `c:\downloads`, give 
 `
 
 ## Requirements
-python3, beautifulsoup4, requests, lxml
+python3, beautifulsoup4, requests, lxml, py7xr (>=0.8.2)
 
 ## Current features:
 - can download an entire collection, creating seperate subdirs for each thing in the collection
@@ -85,6 +86,10 @@ python3, beautifulsoup4, requests, lxml
 - If there is an updated file, the old directory will be moved to `name_timestamp` where `timestamp` is the last upload time of the old files. The code will then copy unchanged files across and download any new ones.
 
 ## Changelog
+* v0.9.0
+  - Compression! New -c option will use 7z to create an archival copy of the file once downloaded. 
+    Note that although it will use the presence of 7z files to determine if a file has been updated, it currently _won't_ read old files from inside the 7z for handling updates, resulting in marginally larger bandwidth usage when dealing with partially updated things. This will be fixed later.
+  - Internal tidying of how old directories are handled - I've tested this fairly heavily, but do let me know if there are issues.
 * v0.8.7
   - Always, Always generate a valid time stamp.
 * v0.8.6

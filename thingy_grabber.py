@@ -24,8 +24,13 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.firefox.options import Options
 import atexit
 import py7zr
+import glob
+import shutil
 
 SEVENZIP_FILTERS = [{'id': py7zr.FILTER_LZMA2}]
+
+# I don't think this is exported by datetime
+DEFAULT_DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 URL_BASE = "https://www.thingiverse.com"
 URL_COLLECTION = URL_BASE + "/ajax/thingcollection/list_collected_things"
@@ -45,6 +50,7 @@ MAX_PATH_LENGTH = 250
 
 VERSION = "0.9.0"
 
+TIMESTAMP_FILE = "timestamp.txt"
 
 #BROWSER = webdriver.PhantomJS('./phantomjs')
 options = Options()
@@ -82,23 +88,29 @@ class FileLinks:
         except TypeError:
             self.last_update = link.last_update
         self.links.append(link)
-    
+
 
 class State(enum.Enum):
     OK = enum.auto()
     FAILED = enum.auto()
     ALREADY_DOWNLOADED = enum.auto()
 
+def rename_unique(dir_name, target_dir_name):
+    """ Move a directory sideways to a new name, ensuring it is unique.
+    """
+    target_dir = target_dir_name
+    inc = 0
+    while os.path.exists(target_dir):
+      target_dir = "{}_{}".format(target_dir_name, inc)
+      inc += 1
+    os.rename(dir_name, target_dir)
+    return target_dir
+
 
 def fail_dir(dir_name):
     """ When a download has failed, move it sideways.
     """
-    target_dir = "{}_failed".format(dir_name)
-    inc = 0
-    while os.path.exists(target_dir):
-      target_dir = "{}_failed_{}".format(dir_name, inc)
-      inc += 1
-    os.rename(dir_name, target_dir)
+    return rename_unique(dir_name,"{}_failed".format(dir_name))
 
 
 def truncate_name(file_name):
@@ -392,55 +404,21 @@ class Thing:
         self.pc = pc
 
 
-        self.old_download_dir = os.path.join(base_dir, slugify(self.title))
-        self.download_dir = os.path.join(base_dir, "{} - {}".format(self.thing_id, slugify(self.title)))
+        self.slug = "{} - {}".format(self.thing_id, slugify(self.title))
+        self.download_dir = os.path.join(base_dir, self.slug)
+
+        self._handle_old_directory(base_dir)
 
         logging.debug("Parsing {} ({})".format(self.thing_id, self.title))
+        latest, self.last_time = self._find_last_download(base_dir)
 
-        if not os.path.exists(self.download_dir):
-            logging.info("Looking for old dir at {}".format(self.old_download_dir))
-            if os.path.exists(self.old_download_dir):
-                logging.warning("Found previous style download directory. Moving it from {} to {}".format(self.old_download_dir, self.download_dir))
-                os.rename(self.old_download_dir, self.download_dir)
-            else:
+        if not latest:
                 # Not yet downloaded
                 self._parsed = True
                 return
 
-        timestamp_file = os.path.join(self.download_dir, 'timestamp.txt')
-        if not os.path.exists(timestamp_file):
-            # Old download from before
-            logging.warning(
-                "Old-style download directory found. Assuming update required.")
-            self._parsed = True
-            return
 
-        try:
-            with open(timestamp_file, 'r') as timestamp_handle:
-                # add the .split(' ')[0] to remove the timestamp from the old style timestamps
-                last_bits = [int(x) for x in timestamp_handle.readlines()[0].split(' ')[0].split("-")]
-                logging.warning(last_bits)
-                if last_bits[0] == 0:
-                    last_bits[0] = 1
-                if last_bits[1] == 0:
-                    last_bits[1] = 1
-                if last_bits[2] == 0:
-                    last_bits[2] = 1980
-                try:
-                    self.last_time = datetime.datetime(last_bits[0], last_bits[1], last_bits[2])
-                except ValueError:
-                    # This one appears to be M D Y
-                    self.last_time = datetime.datetime(last_bits[2], last_bits[0], last_bits[1])
-
-            logging.info("last downloaded version: {}".format(self.last_time))
-        except FileNotFoundError:
-            # Not run on this thing before.
-            logging.info(
-                "Old-style download directory found. Assuming update required.")
-            self.last_time = None
-            self._needs_download = True
-            self._parsed = True
-            return
+        logging.info("last downloaded version: {}".format(self.last_time))
 
         # OK, so we have a timestamp, lets see if there is anything new to get
         try:
@@ -456,6 +434,78 @@ class Thing:
         # Got here, so nope, no new files.
         self._needs_download = False
         self._parsed = True
+
+    def _handle_old_directory(self, base_dir):
+        """ Deal with any old directories from previous versions of the code.
+        """
+        old_dir = os.path.join(base_dir, slugify(self.title))
+        if os.path.exists(old_dir):
+            logging.warning("Found old style download_dir. Moving.")
+            rename_unique(old_dir, self.download_dir)
+
+    def _handle_outdated_directory(self, base_dir):
+        """ Move the current download directory sideways if the thing has changed.
+        """
+        if not os.path.exists(self.download_dir):
+            # No old directory to move.
+            return None
+        timestamp_file = os.path.join(self.download_dir, TIMESTAMP_FILE)
+        if not os.path.exists(timestamp_file):
+            # Old form of download directory
+            target_dir_name = "{} - old".format(self.download_dir)
+        else:
+            target_dir_name = "{} - {}".format(self.download_dir, slugify(self.last_time.__str__()))
+        return rename_unique(self.download_dir, target_dir_name)
+
+    def _find_last_download(self, base_dir):
+        """ Look for the most recent previous download (if any) of the thing.
+        """
+        logging.info("Looking for old things")
+
+        # First the DL directory itself.
+        timestamp_file = os.path.join(self.download_dir, TIMESTAMP_FILE)
+
+        latest = None
+        latest_time = None
+
+        try:
+            logging.debug("Checking for existing download in normal place.")
+            with open(timestamp_file) as ts_fh:
+                timestamp_text = ts_fh.read().strip()
+            latest_time = datetime.datetime.strptime(timestamp_text, DEFAULT_DATETIME_FORMAT)
+            latest = self.download_dir
+        except FileNotFoundError:
+            # No existing download directory. huh.
+            pass
+        except TypeError:
+            logging.warning("Invalid timestamp file found in {}".format(self.download_dir))
+
+        # TODO:  Maybe look for old download directories.
+
+
+        # Now look for 7z files
+        candidates = glob.glob(os.path.join(base_dir, "{}*.7z".format(self.thing_id)))
+        # +3 to allow for ' - '
+        leading_length =len(self.slug)+3
+        for path in candidates:
+            candidate = os.path.basename(path)
+            try:
+                logging.debug("Examining '{}' - '{}'".format(candidate, candidate[leading_length:-3]))
+                candidate_time = datetime.datetime.strptime(candidate[leading_length:-3], DEFAULT_DATETIME_FORMAT)
+            except ValueError:
+                logging.warning("There was an error finding the date in {}. Ignoring.".format(candidate))
+                continue
+            try:
+                if candidate_time > latest_time:
+                    latest_time = candidate_time
+                    latest = candidate
+            except TypeError:
+                latest_time = candidate_time
+                latest = candidate
+        logging.info("Found last old thing: {} / {}".format(latest,latest_time))
+        return (latest, latest_time)
+
+
 
     def download(self, base_dir, compress):
         """ Download all files for a given thing. 
@@ -478,21 +528,7 @@ class Thing:
             return State.FAILED
 
         # Have we already downloaded some things?
-        timestamp_file = os.path.join(self.download_dir, 'timestamp.txt')
-        prev_dir = None
-        if os.path.exists(self.download_dir):
-            if not os.path.exists(timestamp_file):
-                # edge case: old style dir w/out timestamp.
-                logging.warning("Old style download dir found at {}".format(self.title))
-                prev_count = 0
-                target_dir = "{}_old".format(self.download_dir)
-                while os.path.exists(target_dir):
-                    prev_count = prev_count + 1
-                    target_dir = "{}_old_{}".format(self.download_dir, prev_count)
-                os.rename(self.download_dir, target_dir)
-            else:
-                prev_dir = "{}_{}".format(self.download_dir, slugify(self.last_time.__str__()))
-                os.rename(self.download_dir, prev_dir)
+        renamed_dir = self._handle_outdated_directory(base_dir)
 
         # Get the list of files to download
 
@@ -539,7 +575,7 @@ class Thing:
         # First grab the cached files (if any)
         logging.info("Copying {} unchanged files.".format(len(old_file_links)))
         for file_link in old_file_links:
-            old_file = os.path.join(prev_dir, file_link.name)
+            old_file = os.path.join(renamed_dir, file_link.name)
             new_file = truncate_name(os.path.join(self.download_dir, file_link.name))
             try:
                 logging.debug("Copying {} to {}".format(old_file, new_file))
@@ -608,7 +644,7 @@ class Thing:
 
         try:
             # Now write the timestamp
-            with open(timestamp_file, 'w', encoding="utf-8") as timestamp_handle:
+            with open(os.path.join(self.download_dir,TIMESTAMP_FILE), 'w', encoding="utf-8") as timestamp_handle:
                 timestamp_handle.write(self.time_stamp.__str__())
         except Exception as exception:
             print("Failed to write timestamp file - {}".format(exception))
@@ -628,11 +664,11 @@ class Thing:
         logging.debug("Compressing {} to {}".format(
             self.title,
             file_name))
-        #with libarchive.file_writer(filename, 'lzma', '7z') as archive:
         with py7zr.SevenZipFile(file_name, 'w', filters=SEVENZIP_FILTERS) as archive:
-        #with py7zr.SevenZipFile(file_name, 'w' ) as archive:
             archive.writeall(self.download_dir, thing_dir)
         logging.debug("Compression of {} finished.".format(self.title))
+        shutil.rmtree(self.download_dir)
+        logging.debug("Removed temporary download dir of {}.".format(self.title))
         return State.OK
 
 

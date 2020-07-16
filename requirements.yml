@@ -5,3 +5,4 @@ dependencies:
   - beautifulsoup4
   - lxml
   - requests
+  - py7xr

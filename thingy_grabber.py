@@ -30,7 +30,13 @@ SAFE_DATETIME_FORMAT = '%Y-%m-%d %H.%M.%S'
 API_BASE="https://api.thingiverse.com"
 ACCESS_QP="access_token={}"
 PAGE_QP="page={}"
-API_USER_COLLECTION = API_BASE + "/users/{}/things/"
+API_USER_DESIGNS = API_BASE + "/users/{}/things/"
+API_USER_COLLECTIONS = API_BASE + "/users/{}/collections/all?" + ACCESS_QP
+
+# Currently useless as it gives the same info as the matching element in API_USER_COLLECTIONS
+API_COLLECTION = API_BASE + "/collections/{}/?" + ACCESS_QP
+API_COLLECTION_THINGS = API_BASE + "/collections/{}/things/?" + ACCESS_QP
+
 API_THING_DETAILS = API_BASE + "/things/{}/?" + ACCESS_QP
 API_THING_FILES = API_BASE + "/things/{}/files/?" + ACCESS_QP
 API_THING_IMAGES = API_BASE + "/things/{}/images/?" + ACCESS_QP
@@ -193,7 +199,6 @@ class Grouping:
         # These should be set by child classes.
         self.url = None
         self.download_dir = None
-        self.collection_url = None
 
     def get(self):
         """ retrieve the things of the grouping. """
@@ -209,18 +214,29 @@ class Grouping:
         # Get the internal details of the grouping.
         logging.debug("Querying {}".format(self.url))
         page = 0
+        # TODO:: Must be a way to refactor this cleanly
+        if self.paginated:
         # Slightly nasty, but afaik python lacks a clean way to do partial string formatting.
-        page_url = self.url + "?" + ACCESS_QP + "&" + PAGE_QP
-        while True:
-            page += 1
-            current_url = page_url.format(API_KEY, page)
-            logging.info("requesting:{}".format(current_url))
-            current_req = SESSION.get(current_url)
+            page_url = self.url + "?" + ACCESS_QP + "&" + PAGE_QP
+            while True:
+                page += 1
+                current_url = page_url.format(API_KEY, page)
+                logging.info("requesting:{}".format(current_url))
+                current_req = SESSION.get(current_url)
+                # TODO: Check for failure.
+                current_json = current_req.json()
+                if not current_json:
+                    # No more!
+                    break
+                for thing in current_json:
+                    logging.info(thing)
+                    self.things.append(ThingLink(thing['id'], thing['name'], thing['url']))
+        else:
+            # self.url should already have been formatted as we don't need pagination
+            logging.info("requesting:{}".format(self.url))
+            current_req = SESSION.get(self.url)
             # TODO: Check for failure.
             current_json = current_req.json()
-            if not current_json:
-                # No more!
-                break
             for thing in current_json:
                 logging.info(thing)
                 self.things.append(ThingLink(thing['id'], thing['name'], thing['url']))
@@ -257,11 +273,26 @@ class Collection(Grouping):
         Grouping.__init__(self, quick, compress)
         self.user = user
         self.name = name
-        self.url = "{}/{}/collections/{}".format(
-            URL_BASE, self.user, strip_ws(self.name))
+        self.paginated = False
+        # need to figure out the the ID for the collection
+        collection_url = API_USER_COLLECTIONS.format(user, API_KEY)
+        try:
+            current_req = SESSION.get(collection_url)
+        except requests.exceptions.ConnectionError as error:
+            logging.error("Unable to connect for thing {}: {}".format(
+                self.thing_id, error))
+            return
+        collection_list = current_req.json()
+        try:
+            collection = [x for x in collection_list if x['name'] == name][0]
+        except KeyError:
+            logging.error("Unable to find collection {} for user {}".format(name, user))
+            return
+        self.collection_id = collection['id']
+        self.url = API_COLLECTION_THINGS.format(self.collection_id, API_KEY)
+
         self.download_dir = os.path.join(directory,
                                          "{}-{}".format(slugify(self.user), slugify(self.name)))
-        self.collection_url = URL_COLLECTION
 
 
 class Designs(Grouping):
@@ -270,10 +301,10 @@ class Designs(Grouping):
     def __init__(self, user, directory, quick, compress):
         Grouping.__init__(self, quick, compress)
         self.user = user
-        self.url = API_USER_COLLECTION.format(user)
+        self.url = API_USER_DESIGNS.format(user)
+        self.paginated = True
         self.download_dir = os.path.join(
             directory, "{} designs".format(slugify(self.user)))
-        self.collection_url = API_USER_COLLECTION
 
 
 class Thing:
@@ -306,11 +337,22 @@ class Thing:
             logging.error("Unable to connect for thing {}: {}".format(
                 self.thing_id, error))
             return
+        # Check for DMCA
+        if current_req.status_code == 403:
+            logging.error("Access to thing {} is forbidden".format(self.thing_id))
+            return
 
         thing_json = current_req.json()
-        self._license = thing_json['license']
+        try:
+            self._license = thing_json['license']
+        except KeyError:
+            logging.warning("No license found for thing {}?".format(self.thing_id))
+
         # TODO: Get non-html version of this?
-        self._details = thing_json['details']
+        try:
+            self._details = thing_json['details']
+        except KeyError:
+            logging.warning("No description found for thing {}?".format(self.thing_id))
 
 
 

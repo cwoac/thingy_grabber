@@ -14,14 +14,7 @@ import multiprocessing
 import enum
 import datetime
 from shutil import copyfile
-from bs4 import BeautifulSoup
 from dataclasses import dataclass
-import selenium
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.firefox.options import Options
 import atexit
 import py7zr
 import glob
@@ -34,33 +27,32 @@ DEFAULT_DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 # Windows cannot handle : in filenames
 SAFE_DATETIME_FORMAT = '%Y-%m-%d %H.%M.%S'
 
-URL_BASE = "https://www.thingiverse.com"
-URL_COLLECTION = URL_BASE + "/ajax/thingcollection/list_collected_things"
-USER_COLLECTION = URL_BASE + "/ajax/user/designs"
+API_BASE="https://api.thingiverse.com"
+ACCESS_QP="access_token={}"
+PAGE_QP="page={}"
+API_USER_COLLECTION = API_BASE + "/users/{}/things/"
+API_THING_DETAILS = API_BASE + "/things/{}/?" + ACCESS_QP
+API_THING_FILES = API_BASE + "/things/{}/files/?" + ACCESS_QP
+API_THING_IMAGES = API_BASE + "/thing/{}/images/?" + ACCESS_QP
 
-ID_REGEX = re.compile(r'"id":(\d*),')
-TOTAL_REGEX = re.compile(r'"total":(\d*),')
-LAST_PAGE_REGEX = re.compile(r'"last_page":(\d*),')
-# This appears to be fixed at 12, but if it changes would screw the rest up.
-PER_PAGE_REGEX = re.compile(r'"per_page":(\d*),')
-NO_WHITESPACE_REGEX = re.compile(r'[-\s]+')
+API_KEY = None
 
 DOWNLOADER_COUNT = 1
 RETRY_COUNT = 3
 
 MAX_PATH_LENGTH = 250
 
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 
 TIMESTAMP_FILE = "timestamp.txt"
 
-#BROWSER = webdriver.PhantomJS('./phantomjs')
-options = Options()
-options.add_argument("--headless")
-BROWSER = webdriver.Firefox(options=options)
+SESSION = requests.Session()
 
-BROWSER.set_window_size(1980, 1080)
-
+@dataclass
+class ThingLink:
+    thing_id: str
+    name: str
+    api_link: str
 
 @dataclass
 class FileLink:
@@ -146,54 +138,6 @@ def slugify(value):
     value = re.sub(r'\.*$', '', value)
     return value
 
-class PageChecker(object):
-    def __init__(self):
-        self.log = []
-        self.title = None
-        self.file_count = None
-        self.files = None
-        self.images = None
-        self.license = None
-
-
-    def __call__(self, _):
-        try:
-            self.log.append("call")
-            if self.title is None:
-                # first find the name
-                name = EC._find_element(BROWSER, (By.CSS_SELECTOR, "[class^=ThingPage__modelName]"))
-                if name is None: 
-                    return False
-                self.title = name.text
-
-            if self.file_count is None:
-                # OK. Do we know how many files we have to download?
-                metrics = EC._find_elements(BROWSER, (By.CSS_SELECTOR, "[class^=MetricButton]"))
-                self.log.append("got some metrics: {}".format(len(metrics)))
-                cur_count = int([x.text.split("\n")[0] for x in metrics if x.text.endswith("\nThing Files")][0])
-                self.log.append(cur_count)
-                if cur_count == 0:
-                    return False
-                self.file_count = cur_count
-                
-            self.log.append("looking for {} files".format(self.file_count))
-            fileRows = EC._find_elements(BROWSER, (By.CSS_SELECTOR, "[class^=ThingFile__fileRow]"))
-            self.log.append("found {} files".format(len(fileRows)))
-            if len(fileRows) < self.file_count:
-                return False
-
-            self.log.append("Looking for images")
-            # By this point _should_ have loaded all the images
-            self.images = EC._find_elements(BROWSER, (By.CSS_SELECTOR, "[class^=thumb]"))
-            self.license = EC._find_element(BROWSER, (By.CSS_SELECTOR, "[class^=License__licenseText]")).text
-            self.log.append("found {} images".format(len(self.images)))
-            self.files = fileRows
-            return True
-        except Exception:
-            return False
-
-
-
 
 class Downloader(multiprocessing.Process):
     """
@@ -245,15 +189,6 @@ class Grouping:
         self.download_dir = None
         self.collection_url = None
 
-    def _get_small_grouping(self, req):
-        """ Handle small groupings """
-        soup = BeautifulSoup(req.text, features='lxml')
-        links = soup.find_all('a', {'class': 'card-img-holder'})
-        self.things = [x['href'].split(':')[1] for x in links]
-        self.total = len(self.things)
-
-        return self.things
-
     def get(self):
         """ retrieve the things of the grouping. """
         if self.things:
@@ -267,28 +202,23 @@ class Grouping:
 
         # Get the internal details of the grouping.
         logging.debug("Querying {}".format(self.url))
-        c_req = requests.get(self.url)
-        total = TOTAL_REGEX.search(c_req.text)
-        if total is None:
-            # This is a small (<13) items grouping. Pull the list from this req.
-            return self._get_small_grouping(c_req)
-        self.total = total.groups()[0]
-        self.req_id = ID_REGEX.search(c_req.text).groups()[0]
-        self.last_page = int(LAST_PAGE_REGEX.search(c_req.text).groups()[0])
-        self.per_page = PER_PAGE_REGEX.search(c_req.text).groups()[0]
-        parameters = {
-            'base_url': self.url,
-            'page': '1',
-            'per_page': '12',
-            'id': self.req_id
-        }
-        for current_page in range(1, self.last_page + 1):
-            parameters['page'] = current_page
-            req = requests.post(self.collection_url, parameters)
-            soup = BeautifulSoup(req.text, features='lxml')
-            links = soup.find_all('a', {'class': 'card-img-holder'})
-            self.things += [x['href'].split(':')[1] for x in links]
-
+        page = 0
+        # Slightly nasty, but afaik python lacks a clean way to do partial string formatting.
+        page_url = self.url + "?" + ACCESS_QP + "&" + PAGE_QP
+        while True:
+            page += 1
+            current_url = page_url.format(API_KEY, page)
+            logging.info("requesting:{}".format(current_url))
+            current_req = SESSION.get(current_url)
+            # TODO: Check for failure.
+            current_json = current_req.json()
+            if not current_json:
+                # No more!
+                break
+            for thing in current_json:
+                logging.info(thing)
+                self.things.append(ThingLink(thing['id'], thing['name'], thing['url']))
+        logging.info("Found {} things.".format(len(self.things)))
         return self.things
 
     def download(self):
@@ -314,10 +244,6 @@ class Grouping:
                 logging.info("Caught up, stopping.")
                 return
 
-
-
-
-
 class Collection(Grouping):
     """ Holds details of a collection. """
 
@@ -338,80 +264,85 @@ class Designs(Grouping):
     def __init__(self, user, directory, quick, compress):
         Grouping.__init__(self, quick, compress)
         self.user = user
-        self.url = "{}/{}/designs".format(URL_BASE, self.user)
+        self.url = API_USER_COLLECTION.format(user)
         self.download_dir = os.path.join(
             directory, "{} designs".format(slugify(self.user)))
-        self.collection_url = USER_COLLECTION
+        self.collection_url = API_USER_COLLECTION
 
 
 class Thing:
     """ An individual design on thingiverse. """
 
-    def __init__(self, thing_id):
-        self.thing_id = thing_id
+    def __init__(self, thing_link):
+        self.thing_id = thing_link.thing_id
+        self.name = thing_link.name
+        self.api_link = thing_link.api_link
         self.last_time = None
         self._parsed = False
         self._needs_download = True
         self.text = None
-        self.title = None
         self.download_dir = None
         self.time_stamp = None
         self._file_links = FileLinks()
+        self._image_links = []
 
     def _parse(self, base_dir):
         """ Work out what, if anything needs to be done. """
         if self._parsed:
             return
 
-        url = "{}/thing:{}/files".format(URL_BASE, self.thing_id)
+
+        # First get the broad details
+        url = API_THING_DETAILS.format(self.thing_id, API_KEY)
         try:
-            BROWSER.get(url)
-            wait = WebDriverWait(BROWSER, 60)
-            pc = PageChecker()
-            wait.until(pc)
+            current_req = SESSION.get(url)
         except requests.exceptions.ConnectionError as error:
             logging.error("Unable to connect for thing {}: {}".format(
                 self.thing_id, error))
             return
-        except selenium.common.exceptions.TimeoutException:
-            logging.error(pc.log)
-            logging.error("Timeout trying to parse thing {}".format(self.thing_id))
+
+        thing_json = current_req.json()
+        self._license = thing_json['license']
+        # TODO: Get non-html version of this?
+        self._details = thing_json['details']
+
+
+
+        # Now get the file details
+        file_url = API_THING_FILES.format(self.thing_id, API_KEY)
+
+        try:
+            current_req = SESSION.get(file_url)
+            # TODO:: error handling, sessions
+        except requests.exceptions.ConnectionError as error:
+            logging.error("Unable to connect for thing {}: {}".format(
+                self.thing_id, error))
             return
 
-        self.title = pc.title
-        if not pc.files:
+        link_list = current_req.json()
+
+        if not link_list:
             logging.error("No files found for thing {} - probably thingiverse being broken, try again later".format(self.thing_id))
-        for link in pc.files:
-            logging.debug("Parsing link: {}".format(link.text))
-            link_link = link.find_element_by_xpath(".//a").get_attribute("href")
-            if link_link.endswith("/zip"):
-                # bulk link.
-                continue
+
+        for link in link_list:
+            logging.debug("Parsing link: {}".format(link))
             try:
-                link_title, link_details, _ = link.text.split("\n")
+                datestamp = datetime.datetime.strptime(link['date'], DEFAULT_DATETIME_FORMAT)
+                self._file_links.append(FileLink(link['name'], datestamp, link['url']))
             except ValueError:
-                # If it is a filetype that doesn't generate a picture, then we get an extra field at the start.
-                _, link_title, link_details, _ = link.text.split("\n")
-                
-            #link_details will be something like '461 kb | Updated 06-11-2019 | 373 Downloads'
-            #need to convert from M D Y to Y M D
-            link_date = [int(x) for x in link_details.split("|")[1].split()[-1].split("-")]
-            try:
-                self._file_links.append(FileLink(link_title, datetime.datetime(link_date[2], link_date[0], link_date[1]), link_link))
-            except ValueError:
-                logging.error(link_date)
+                logging.error(link['date'])
 
-        self._image_links=[x.find_element_by_xpath(".//img").get_attribute("src") for x in pc.images]
-        self._license = pc.license
-        self.pc = pc
+        # Finally get the image links
+
+        # TODO:: GET IMAGES
 
 
-        self.slug = "{} - {}".format(self.thing_id, slugify(self.title))
+        self.slug = "{} - {}".format(self.thing_id, slugify(self.name))
         self.download_dir = os.path.join(base_dir, self.slug)
 
         self._handle_old_directory(base_dir)
 
-        logging.debug("Parsing {} ({})".format(self.thing_id, self.title))
+        logging.debug("Parsing {} ({})".format(self.thing_id, self.name))
         latest, self.last_time = self._find_last_download(base_dir)
 
         if not latest:
@@ -440,7 +371,7 @@ class Thing:
     def _handle_old_directory(self, base_dir):
         """ Deal with any old directories from previous versions of the code.
         """
-        old_dir = os.path.join(base_dir, slugify(self.title))
+        old_dir = os.path.join(base_dir, slugify(self.name))
         if os.path.exists(old_dir):
             logging.warning("Found old style download_dir. Moving.")
             rename_unique(old_dir, self.download_dir)
@@ -522,11 +453,11 @@ class Thing:
             return State.FAILED
 
         if not self._needs_download:
-            print("{} - {} already downloaded - skipping.".format(self.thing_id, self.title))
+            print("{} - {} already downloaded - skipping.".format(self.thing_id, self.name))
             return State.ALREADY_DOWNLOADED
 
         if not self._file_links:
-            print("{} - {} appears to have no files. Thingiverse acting up again?".format(self.thing_id, self.title))
+            print("{} - {} appears to have no files. Thingiverse acting up again?".format(self.thing_id, self.name))
             return State.FAILED
 
         # Have we already downloaded some things?
@@ -562,16 +493,10 @@ class Thing:
         logging.debug("Generating download_dir")
         os.mkdir(self.download_dir)
         filelist_file = os.path.join(self.download_dir, "filelist.txt")
+        url_suffix = "/?" + ACCESS_QP.format(API_KEY)
         with open(filelist_file, 'w', encoding="utf-8") as fl_handle:
             for fl in self._file_links:
-              base_link = fl.link
-              try:
-                fl.link=requests.get(fl.link, allow_redirects=False).headers['location']
-              except Exception:
-                # Sometimes Thingiverse just gives us the direct link the first time. Not sure why.
-                pass
-              
-              fl_handle.write("{},{},{}, {}\n".format(fl.link, fl.name, fl.last_update, base_link))
+              fl_handle.write("{},{},{}\n".format(fl.link, fl.name, fl.last_update))
 
 
         # First grab the cached files (if any)
@@ -595,7 +520,7 @@ class Thing:
                 file_name = truncate_name(os.path.join(self.download_dir, file_link.name))
                 logging.debug("Downloading {} from {} to {}".format(
                     file_link.name, file_link.link, file_name))
-                data_req = requests.get(file_link.link)
+                data_req = SESSION.get(file_link.link + url_suffix)
                 with open(file_name, 'wb') as handle:
                     handle.write(data_req.content)
         except Exception as exception:
@@ -613,7 +538,7 @@ class Thing:
                 filename = os.path.basename(imagelink)
                 if filename.endswith('stl'):
                     filename = "{}.png".format(filename)
-                image_req = requests.get(imagelink)
+                image_req = SESSION.get(imagelink)
                 with open(truncate_name(os.path.join(image_dir, filename)), 'wb') as handle:
                     handle.write(image_req.content)
         except Exception as exception:
@@ -636,13 +561,21 @@ class Thing:
 
         """
         # Best get some licenses
-        logging.info("Downloading license")
+        logging.info("writing license file")
         try:
             if self._license:
                 with open(truncate_name(os.path.join(self.download_dir, 'license.txt')), 'w', encoding="utf-8") as license_handle:
                     license_handle.write("{}\n".format(self._license))
         except IOError as exception:
             logging.warning("Failed to write license! {}".format(exception))
+
+        logging.info("writing readme")
+        try:
+            if self._details:
+                with open(truncate_name(os.path.join(self.download_dir, 'readme.txt')), 'w', encoding="utf-8") as readme_handle:
+                    readme_handle.write("{}\n".format(self._details))
+        except IOError as exception:
+            logging.warning("Failed to write readme! {}".format(exception))
 
         try:
             # Now write the timestamp
@@ -653,24 +586,24 @@ class Thing:
             fail_dir(self.download_dir)
             return State.FAILED
         self._needs_download = False
-        logging.debug("Download of {} finished".format(self.title))
+        logging.debug("Download of {} finished".format(self.name))
         if not compress:
             return State.OK
 
 
         thing_dir = "{} - {} - {}".format(self.thing_id,
-            slugify(self.title),
+            slugify(self.name),
             self.time_stamp.strftime(SAFE_DATETIME_FORMAT))
         file_name = os.path.join(base_dir,
             "{}.7z".format(thing_dir))
         logging.debug("Compressing {} to {}".format(
-            self.title,
+            self.name,
             file_name))
         with py7zr.SevenZipFile(file_name, 'w', filters=SEVENZIP_FILTERS) as archive:
             archive.writeall(self.download_dir, thing_dir)
-        logging.debug("Compression of {} finished.".format(self.title))
+        logging.debug("Compression of {} finished.".format(self.name))
         shutil.rmtree(self.download_dir)
-        logging.debug("Removed temporary download dir of {}.".format(self.title))
+        logging.debug("Removed temporary download dir of {}.".format(self.name))
         return State.OK
 
 
@@ -718,7 +651,9 @@ def main():
                         help="Assume date ordering on posts")
     parser.add_argument("-c", "--compress", action="store_true",
                         help="Compress files")
-                        
+    parser.add_argument("-a", "--api-key",
+                        help="API key for thingiverse")
+            
 
     subparsers = parser.add_subparsers(
         help="Type of thing to download", dest="subcommand")
@@ -755,6 +690,9 @@ def main():
     console_handler = logging.StreamHandler()
     console_handler.setLevel(args.log_level.upper())
 
+    global API_KEY
+    API_KEY=args.api_key
+
     logger.addHandler(console_handler)
     if args.log_file:
         file_handler = logging.FileHandler(args.log_file)
@@ -789,7 +727,6 @@ def main():
     for downloader in downloaders:
         thing_queue.put(None)
 
-atexit.register(BROWSER.quit)
 
 if __name__ == "__main__":    
     multiprocessing.freeze_support()

@@ -691,7 +691,16 @@ def main():
     console_handler.setLevel(args.log_level.upper())
 
     global API_KEY
-    API_KEY=args.api_key
+    if args.api_key:
+        API_KEY=args.api_key
+    else:
+        try:
+            with open("api.key") as fh:
+                API_KEY=fh.read().strip()
+        except Exception as e:
+            logging.error("Either specify the api-key on the command line or in a file called 'api.key'")
+            logging.error("Exception: {}".format(e))
+            return
 
     logger.addHandler(console_handler)
     if args.log_file:

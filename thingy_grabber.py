@@ -284,9 +284,11 @@ class Collection(Grouping):
             return
         collection_list = current_req.json()
         try:
-            collection = [x for x in collection_list if x['name'] == name][0]
-        except KeyError:
+            # case insensitive to retain parity with previous behaviour
+            collection = [x for x in collection_list if x['name'].casefold() == name.casefold()][0]
+        except IndexError:
             logging.error("Unable to find collection {} for user {}".format(name, user))
+            logging.error(collection_list)
             return
         self.collection_id = collection['id']
         self.url = API_COLLECTION_THINGS.format(self.collection_id, API_KEY)

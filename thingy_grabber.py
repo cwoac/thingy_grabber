@@ -233,7 +233,7 @@ class Grouping:
             while True:
                 page += 1
                 current_url = page_url.format(API_KEY, page)
-                logging.info("requesting:{}".format(current_url))
+                logging.info("requesting:{}".format(sanitise_url(current_url)))
                 current_req = SESSION.get(current_url)
                 # TODO: Check for failure.
                 current_json = current_req.json()
@@ -386,7 +386,7 @@ class Thing:
             logging.error("No files found for thing {} - probably thingiverse being broken, try again later".format(self.thing_id))
 
         for link in link_list:
-            logging.debug("Parsing link: {}".format(link))
+            logging.debug("Parsing link: {}".format(sanitise_url(link)))
             try:
                 datestamp = datetime.datetime.strptime(link['date'], DEFAULT_DATETIME_FORMAT)
                 self._file_links.append(FileLink(link['name'], datestamp, link['url']))

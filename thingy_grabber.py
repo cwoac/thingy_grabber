@@ -100,6 +100,11 @@ class State(enum.Enum):
     FAILED = enum.auto()
     ALREADY_DOWNLOADED = enum.auto()
 
+def strip_time(date_obj):
+    """ Takes a datetime object and returns another with the time set to 00:00
+    """
+    return datetime.datetime.combine(date_obj.date(), datetime.time())
+
 def rename_unique(dir_name, target_dir_name):
     """ Move a directory sideways to a new name, ensuring it is unique.
     """
@@ -424,8 +429,17 @@ class Thing:
         logging.info("last downloaded version: {}".format(self.last_time))
 
         # OK, so we have a timestamp, lets see if there is anything new to get
+        # First off, are we comparing an old download that threw away the timestamp?
+        ignore_time = self.last_time == strip_time(self.last_time)
         try:
-            if self._file_links.last_update > self.last_time:
+            # TODO: Allow for comparison at the exact time
+            files_last_update = self._file_links.last_update
+            if ignore_time:
+                logging.info("Dropping time from comparison stamp as old-style download dir")
+                files_last_update = strip_time(files_last_update)
+
+
+            if files_last_update > self.last_time:
                 logging.info(
                     "Found new/updated files {}".format(self._file_links.last_update))
                 self._needs_download = True

@@ -35,13 +35,8 @@ Thingy_grabber v0.10.0 accesses thingiverse in a _substantially_ different way t
 To do this, go to https://www.thingiverse.com/apps/create and create your own selecting Desktop app.
 Once you have your key, either specify it on the command line or put it in a text file called `api.key` whereever you are running the script from - the script will auto load it.
 
-Note that quite a few files are going to be redownloaded by this script as the API gives slightly different timestamps to the webscraper. Sorry - this should be a one-time thing.
-
 ### Why can't I use yours? 
 Because API keys can (are?) rate limited.
-
-### Logging warning
-At the moment log files log the exact URLs that are requested, which will _include_ your api-key, so be very careful about your log files. I _will_ be fixing this soon, but I figured getting this out there sooner was more important.
 
 ### Things
 `thingy_grabber.py thing thingid1 thingid2 ...`

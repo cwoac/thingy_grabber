@@ -100,6 +100,13 @@ class State(enum.Enum):
     FAILED = enum.auto()
     ALREADY_DOWNLOADED = enum.auto()
 
+def sanitise_url(url):
+    """ remove api keys from an url
+    """
+    return re.sub(r'access_token=\w*',
+                  'access_token=***',
+                  url)
+
 def strip_time(date_obj):
     """ Takes a datetime object and returns another with the time set to 00:00
     """
@@ -217,7 +224,7 @@ class Grouping:
             raise ValueError("No URL set - object not initialised properly?")
 
         # Get the internal details of the grouping.
-        logging.debug("Querying {}".format(self.url))
+        logging.debug("Querying {}".format(sanitise_url(self.url)))
         page = 0
         # TODO:: Must be a way to refactor this cleanly
         if self.paginated:
@@ -238,7 +245,7 @@ class Grouping:
                     self.things.append(ThingLink(thing['id'], thing['name'], thing['url']))
         else:
             # self.url should already have been formatted as we don't need pagination
-            logging.info("requesting:{}".format(self.url))
+            logging.info("requesting:{}".format(sanitise_url(self.url)))
             current_req = SESSION.get(self.url)
             # TODO: Check for failure.
             current_json = current_req.json()
@@ -293,7 +300,6 @@ class Collection(Grouping):
             collection = [x for x in collection_list if x['name'].casefold() == name.casefold()][0]
         except IndexError:
             logging.error("Unable to find collection {} for user {}".format(name, user))
-            logging.error(collection_list)
             return
         self.collection_id = collection['id']
         self.url = API_COLLECTION_THINGS.format(self.collection_id, API_KEY)
@@ -537,11 +543,11 @@ class Thing:
             return State.FAILED
 
         if not self._needs_download:
-            print("{} - {} already downloaded - skipping.".format(self.thing_id, self.name))
+            logging.info("{} - {} already downloaded - skipping.".format(self.thing_id, self.name))
             return State.ALREADY_DOWNLOADED
 
         if not self._file_links:
-            print("{} - {} appears to have no files. Thingiverse acting up again?".format(self.thing_id, self.name))
+            logging.error("{} - {} appears to have no files. Thingiverse acting up again?".format(self.thing_id, self.name))
             return State.FAILED
 
         # Have we already downloaded some things?
@@ -624,7 +630,7 @@ class Thing:
                 with open(truncate_name(filename), 'wb') as handle:
                     handle.write(image_req.content)
         except Exception as exception:
-            print("Failed to download {} - {}".format(imagelink.name, exception))
+            logging.error("Failed to download {} - {}".format(imagelink.name, exception))
             fail_dir(self.download_dir)
             return State.FAILED
 
@@ -650,7 +656,7 @@ class Thing:
             with open(os.path.join(self.download_dir,TIMESTAMP_FILE), 'w', encoding="utf-8") as timestamp_handle:
                 timestamp_handle.write(self.time_stamp.__str__())
         except Exception as exception:
-            print("Failed to write timestamp file - {}".format(exception))
+            logging.error("Failed to write timestamp file - {}".format(exception))
             fail_dir(self.download_dir)
             return State.FAILED
         self._needs_download = False

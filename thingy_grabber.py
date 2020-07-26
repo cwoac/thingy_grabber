@@ -33,7 +33,7 @@ PAGE_QP="page={}"
 API_USER_COLLECTION = API_BASE + "/users/{}/things/"
 API_THING_DETAILS = API_BASE + "/things/{}/?" + ACCESS_QP
 API_THING_FILES = API_BASE + "/things/{}/files/?" + ACCESS_QP
-API_THING_IMAGES = API_BASE + "/thing/{}/images/?" + ACCESS_QP
+API_THING_IMAGES = API_BASE + "/things/{}/images/?" + ACCESS_QP
 
 API_KEY = None
 
@@ -58,6 +58,11 @@ class ThingLink:
 class FileLink:
     name: str
     last_update: datetime.datetime
+    link: str
+
+@dataclass
+class ImageLink:
+    name: str
     link: str
 
 class FileLinks:
@@ -133,6 +138,7 @@ def slugify(value):
     Normalise string, removes invalid for filename charactersr
     and converts string to lowercase.
     """
+    logging.debug("Sluggyfying {}".format(value))
     value = unicodedata.normalize('NFKC', value).lower().strip()
     value = re.sub(r'[\\/<>:\?\*\|"]', '', value)
     value = re.sub(r'\.*$', '', value)
@@ -333,9 +339,29 @@ class Thing:
                 logging.error(link['date'])
 
         # Finally get the image links
+        image_url = API_THING_IMAGES.format(self.thing_id, API_KEY)
 
-        # TODO:: GET IMAGES
+        try:
+            current_req = SESSION.get(image_url)
+        except requests.exceptions.ConnectionError as error:
+            logging.error("Unable to connect for thing {}: {}".format(
+                self.thing_id, error))
+            return
 
+        image_list = current_req.json()
+
+        if not image_list:
+            logging.warning("No images found for thing {} - probably thingiverse being iffy as this seems unlikely".format(self.thing_id))
+
+        for image in image_list:
+            logging.debug("parsing image: {}".format(image))
+            try:
+                name = slugify(image['name'])
+                # TODO: fallback to other types
+                url = [x for x in image['sizes'] if x['type']=='display' and x['size']=='large'][0]['url']
+            except KeyError:
+                logging.warning("Missing image for {}".format(name))
+            self._image_links.append(ImageLink(name, url))
 
         self.slug = "{} - {}".format(self.thing_id, slugify(self.name))
         self.download_dir = os.path.join(base_dir, self.slug)
@@ -529,37 +555,21 @@ class Thing:
             return State.FAILED
 
 
-        # People like images. But this doesn't work yet.
+        # People like images.
         image_dir = os.path.join(self.download_dir, 'images')
         logging.info("Downloading {} images.".format(len(self._image_links)))
         try:
             os.mkdir(image_dir)
             for imagelink in self._image_links:
-                filename = os.path.basename(imagelink)
-                if filename.endswith('stl'):
-                    filename = "{}.png".format(filename)
-                image_req = SESSION.get(imagelink)
-                with open(truncate_name(os.path.join(image_dir, filename)), 'wb') as handle:
+                filename = os.path.join(image_dir, imagelink.name)
+                image_req = SESSION.get(imagelink.link)
+                with open(truncate_name(filename), 'wb') as handle:
                     handle.write(image_req.content)
         except Exception as exception:
-            print("Failed to download {} - {}".format(filename, exception))
+            print("Failed to download {} - {}".format(imagelink.name, exception))
             fail_dir(self.download_dir)
             return State.FAILED
 
-        """
-        # instructions are good too.
-        logging.info("Downloading readme")
-        try:
-            readme_txt = soup.find('meta', property='og:description')[
-                'content']
-            with open(os.path.join(self.download_dir, 'readme.txt'), 'w') as readme_handle:
-                readme_handle.write("{}\n".format(readme_txt))
-        except (TypeError, KeyError) as exception:
-            logging.warning("No readme? {}".format(exception))
-        except IOError as exception:
-            logging.warning("Failed to write readme! {}".format(exception))
-
-        """
         # Best get some licenses
         logging.info("writing license file")
         try:

@@ -2,7 +2,5 @@ name: thingy
 channels:
   - defaults
 dependencies:
-  - beautifulsoup4
-  - lxml
   - requests
   - py7zr

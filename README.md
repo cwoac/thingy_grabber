@@ -1,9 +1,10 @@
 # thingy_grabber
-Script for archiving thingiverse things. Due to this being a glorified webscraper, it's going to be very fragile.
+Script for archiving thingiverse things.
 
 ## Usage:
 ````
-usage: thingy_grabber.py [-h] [-l {debug,info,warning}] [-d DIRECTORY] [-f LOG_FILE] [-q] [-c] {collection,thing,user,batch,version} ...
+usage: thingy_grabber.py [-h] [-l {debug,info,warning}] [-d DIRECTORY] [-f LOG_FILE] [-q] [-c] [-a API_KEY]
+                         {collection,thing,user,batch,version} ...
 
 positional arguments:
   {collection,thing,user,batch,version}
@@ -24,7 +25,18 @@ optional arguments:
                         Place to log debug information to
   -q, --quick           Assume date ordering on posts
   -c, --compress        Compress files
+  -a API_KEY, --api-key API_KEY
+                        API key for thingiverse
 ````
+
+## API KEYs
+Thingy_grabber v0.10.0 accesses thingiverse in a _substantially_ different way to before. The plus side is it should be more reliable, possibly faster and no longer needs selenium or a firefox instance (and so drastically reduces memory overhead). The downside is you are _going_ to have to do something to continue using the app - basically get yourself an API KEY.
+
+To do this, go to https://www.thingiverse.com/apps/create and create your own selecting Desktop app.
+Once you have your key, either specify it on the command line or put it in a text file called `api.key` whereever you are running the script from - the script will auto load it.
+
+### Why can't I use yours? 
+Because API keys can (are?) rate limited.
 
 ### Things
 `thingy_grabber.py thing thingid1 thingid2 ...`
@@ -78,7 +90,7 @@ Download all designs by jim and bob into directories under `c:\downloads`, give 
 `
 
 ## Requirements
-python3, beautifulsoup4, requests, lxml, py7xr (>=0.8.2)
+python3, requests, py7xr (>=0.8.2)
 
 ## Current features:
 - can download an entire collection, creating seperate subdirs for each thing in the collection
@@ -86,6 +98,8 @@ python3, beautifulsoup4, requests, lxml, py7xr (>=0.8.2)
 - If there is an updated file, the old directory will be moved to `name_timestamp` where `timestamp` is the last upload time of the old files. The code will then copy unchanged files across and download any new ones.
 
 ## Changelog
+* v0.10.0
+  - API access! new -a option to provide an API key for more stable access.
 * v0.9.0
   - Compression! New -c option will use 7z to create an archival copy of the file once downloaded. 
     Note that although it will use the presence of 7z files to determine if a file has been updated, it currently _won't_ read old files from inside the 7z for handling updates, resulting in marginally larger bandwidth usage when dealing with partially updated things. This will be fixed later.

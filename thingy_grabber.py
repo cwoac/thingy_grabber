@@ -235,23 +235,26 @@ class Grouping:
                 current_url = page_url.format(API_KEY, page)
                 logging.info("requesting:{}".format(sanitise_url(current_url)))
                 current_req = SESSION.get(current_url)
-                # TODO: Check for failure.
+                if current_req.status_code != 200:
+                    logging.error("Got unexpected code {} from url {}: {}".format(current_req.status_code, sanitise_url(current_url), current_req.text))
+                    break
                 current_json = current_req.json()
                 if not current_json:
                     # No more!
                     break
                 for thing in current_json:
-                    logging.info(thing)
                     self.things.append(ThingLink(thing['id'], thing['name'], thing['url']))
         else:
             # self.url should already have been formatted as we don't need pagination
             logging.info("requesting:{}".format(sanitise_url(self.url)))
             current_req = SESSION.get(self.url)
-            # TODO: Check for failure.
-            current_json = current_req.json()
-            for thing in current_json:
-                logging.info(thing)
-                self.things.append(ThingLink(thing['id'], thing['name'], thing['url']))
+            if current_req.status_code != 200:
+                logging.error("Got unexpected code {} from url {}: {}".format(current_req.status_code, sanitise_url(current_url), current_req.text))
+            else:
+                current_json = current_req.json()
+                for thing in current_json:
+                    logging.info(thing)
+                    self.things.append(ThingLink(thing['id'], thing['name'], thing['url']))
         logging.info("Found {} things.".format(len(self.things)))
         return self.things
 
@@ -293,6 +296,9 @@ class Collection(Grouping):
         except requests.exceptions.ConnectionError as error:
             logging.error("Unable to connect for thing {}: {}".format(
                 self.thing_id, error))
+            return
+        if current_req.status_code != 200:
+            logging.error("Got unexpected code {} from url {}: {}".format(current_req.status_code, sanitise_url(collection_url), current_req.text))
             return
         collection_list = current_req.json()
         try:
@@ -354,6 +360,9 @@ class Thing:
         if current_req.status_code == 403:
             logging.error("Access to thing {} is forbidden".format(self.thing_id))
             return
+        if current_req.status_code != 200:
+            logging.error("Got unexpected code {} from url {}: {}".format(current_req.status_code, sanitise_url(url), current_req.text))
+            return
 
         thing_json = current_req.json()
         try:
@@ -374,10 +383,13 @@ class Thing:
 
         try:
             current_req = SESSION.get(file_url)
-            # TODO:: error handling, sessions
         except requests.exceptions.ConnectionError as error:
             logging.error("Unable to connect for thing {}: {}".format(
                 self.thing_id, error))
+            return
+
+        if current_req.status_code != 200:
+            logging.error("Unexpected status code {} for {}: {}".format(current_req.status_code, sanitise_url(file_url), current_req.text))
             return
 
         link_list = current_req.json()
@@ -386,7 +398,7 @@ class Thing:
             logging.error("No files found for thing {} - probably thingiverse being broken, try again later".format(self.thing_id))
 
         for link in link_list:
-            logging.debug("Parsing link: {}".format(sanitise_url(link)))
+            logging.debug("Parsing link: {}".format(sanitise_url(link['url'])))
             try:
                 datestamp = datetime.datetime.strptime(link['date'], DEFAULT_DATETIME_FORMAT)
                 self._file_links.append(FileLink(link['name'], datestamp, link['url']))
@@ -401,6 +413,10 @@ class Thing:
         except requests.exceptions.ConnectionError as error:
             logging.error("Unable to connect for thing {}: {}".format(
                 self.thing_id, error))
+            return
+
+        if current_req.status_code != 200:
+            logging.error("Unexpected status code {} for {}: {}".format(current_req.status_code, sanitise_url(image_url), current_req.text))
             return
 
         image_list = current_req.json()
@@ -611,6 +627,12 @@ class Thing:
                 logging.debug("Downloading {} from {} to {}".format(
                     file_link.name, file_link.link, file_name))
                 data_req = SESSION.get(file_link.link + url_suffix)
+                if data_req.status_code != 200:
+                    logging.error("Unexpected status code {} for {}: {}".format(data_req.status_code, sanitise_url(file_link.link), data_req.text))
+                    fail_dir(self.download_dir)
+                    return State.FAILED
+                   
+
                 with open(file_name, 'wb') as handle:
                     handle.write(data_req.content)
         except Exception as exception:
@@ -627,6 +649,10 @@ class Thing:
             for imagelink in self._image_links:
                 filename = os.path.join(image_dir, imagelink.name)
                 image_req = SESSION.get(imagelink.link)
+                if image_req.status_code != 200:
+                    logging.error("Unexpected status code {} for {}: {}".format(image_req.status_code, sanitise_url(file_link.link), image_req.text))
+                    fail_dir(self.download_dir)
+                    return State.FAILED
                 with open(truncate_name(filename), 'wb') as handle:
                     handle.write(image_req.content)
         except Exception as exception:

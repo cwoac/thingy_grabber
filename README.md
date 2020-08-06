@@ -38,6 +38,9 @@ Once you have your key, either specify it on the command line or put it in a tex
 ### Why can't I use yours? 
 Because API keys can (are?) rate limited.
 
+## Downloads
+The latest version can be downloaded from here: https://github.com/cwoac/thingy_grabber/releases/.  Under the 'assets' triangle there is precompiled binaries for windows (no python needed!).
+
 ### Things
 `thingy_grabber.py thing thingid1 thingid2 ...`
 This will create a directory named after the title of the thing(s) with the given ID(s) and download the files into it.

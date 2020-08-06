@@ -48,7 +48,7 @@ RETRY_COUNT = 3
 
 MAX_PATH_LENGTH = 250
 
-VERSION = "0.10.0"
+VERSION = "0.10.1"
 
 TIMESTAMP_FILE = "timestamp.txt"
 
@@ -607,16 +607,23 @@ class Thing:
 
         # First grab the cached files (if any)
         logging.info("Copying {} unchanged files.".format(len(old_file_links)))
-        for file_link in old_file_links:
-            old_file = os.path.join(renamed_dir, file_link.name)
-            new_file = truncate_name(os.path.join(self.download_dir, file_link.name))
-            try:
-                logging.debug("Copying {} to {}".format(old_file, new_file))
-                copyfile(old_file, new_file)
-            except FileNotFoundError:
-                logging.warning(
-                    "Unable to find {} in old archive, redownloading".format(file_link["title"]))
-                new_file_links.append(file_link)
+        if renamed_dir:
+            for file_link in old_file_links:
+                try:
+                    old_file = os.path.join(renamed_dir, file_link.name)
+                    new_file = truncate_name(os.path.join(self.download_dir, file_link.name))
+                    logging.debug("Copying {} to {}".format(old_file, new_file))
+                    copyfile(old_file, new_file)
+                except FileNotFoundError:
+                    logging.warning(
+                        "Unable to find {} in old archive, redownloading".format(file_link.name))
+                    new_file_links.append(file_link)
+                except TypeError:
+                    # Not altogether sure how this could occur, possibly with some combination of the old file types
+                    logging.warning(
+                        "Typeerror looking for {} in {}".format(file_link.name, renamed_dir))
+                    new_file_links.append(file_link)
+
 
         # Now download the new ones
         logging.info("Downloading {} new files of {}".format(

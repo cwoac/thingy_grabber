@@ -40,6 +40,7 @@ API_COLLECTION_THINGS = API_BASE + "/collections/{}/things/?" + ACCESS_QP
 API_THING_DETAILS = API_BASE + "/things/{}/?" + ACCESS_QP
 API_THING_FILES = API_BASE + "/things/{}/files/?" + ACCESS_QP
 API_THING_IMAGES = API_BASE + "/things/{}/images/?" + ACCESS_QP
+API_THING_DOWNLOAD = "/download/?" + ACCESS_QP
 
 API_KEY = None
 
@@ -48,7 +49,7 @@ RETRY_COUNT = 3
 
 MAX_PATH_LENGTH = 250
 
-VERSION = "0.10.1"
+VERSION = "0.10.2"
 
 TIMESTAMP_FILE = "timestamp.txt"
 
@@ -401,7 +402,7 @@ class Thing:
             logging.debug("Parsing link: {}".format(sanitise_url(link['url'])))
             try:
                 datestamp = datetime.datetime.strptime(link['date'], DEFAULT_DATETIME_FORMAT)
-                self._file_links.append(FileLink(link['name'], datestamp, link['url']))
+                self._file_links.append(FileLink(link['name'], datestamp, link['url'] + API_THING_DOWNLOAD.format(API_KEY)))
             except ValueError:
                 logging.error(link['date'])
 
@@ -599,7 +600,6 @@ class Thing:
         logging.debug("Generating download_dir")
         os.mkdir(self.download_dir)
         filelist_file = os.path.join(self.download_dir, "filelist.txt")
-        url_suffix = "/?" + ACCESS_QP.format(API_KEY)
         with open(filelist_file, 'w', encoding="utf-8") as fl_handle:
             for fl in self._file_links:
               fl_handle.write("{},{},{}\n".format(fl.link, fl.name, fl.last_update))
@@ -633,7 +633,7 @@ class Thing:
                 file_name = truncate_name(os.path.join(self.download_dir, file_link.name))
                 logging.debug("Downloading {} from {} to {}".format(
                     file_link.name, file_link.link, file_name))
-                data_req = SESSION.get(file_link.link + url_suffix)
+                data_req = SESSION.get(file_link.link)
                 if data_req.status_code != 200:
                     logging.error("Unexpected status code {} for {}: {}".format(data_req.status_code, sanitise_url(file_link.link), data_req.text))
                     fail_dir(self.download_dir)

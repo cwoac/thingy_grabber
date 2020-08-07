@@ -101,7 +101,9 @@ python3, requests, py7xr (>=0.8.2)
 - If there is an updated file, the old directory will be moved to `name_timestamp` where `timestamp` is the last upload time of the old files. The code will then copy unchanged files across and download any new ones.
 
 ## Changelog
-* V0.10.1
+* v0.10.2
+  - Fixed regression in rest API
+* v0.10.1
   - A couple of minor bug fixes on exception handling.
 * v0.10.0
   - API access! new -a option to provide an API key for more stable access.

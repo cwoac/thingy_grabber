@@ -29,6 +29,9 @@ optional arguments:
                         API key for thingiverse
 ````
 
+## Warning
+Currently downloading individual things by ID is broken. This should be fixed soon.
+
 ## API KEYs
 Thingy_grabber v0.10.0 accesses thingiverse in a _substantially_ different way to before. The plus side is it should be more reliable, possibly faster and no longer needs selenium or a firefox instance (and so drastically reduces memory overhead). The downside is you are _going_ to have to do something to continue using the app - basically get yourself an API KEY.
 
@@ -41,6 +44,29 @@ Because API keys can (are?) rate limited.
 ## Downloads
 The latest version can be downloaded from here: https://github.com/cwoac/thingy_grabber/releases/.  Under the 'assets' triangle there is precompiled binaries for windows (no python needed!).
 
+## Getting started
+First download the code. Either grab the source, or get the windows binary from above and extract it somewhere. If you are running from source, see `requirements.yaml` for the packages you need. You will also need an API key (as above) and to make a directory to store your downloads in.
+
+oh, and you need to know what you want to download, ofc. It can be either things, collections or just the designs of a user.
+once you have done all this you need to open a command prompt and run it.
+
+Let's say you are running windows and using the precompiled binary and extracted the release to the `thingy_grabber` directory on your desktop and you made a `things` directory in your `Documents` directory. 
+When you open the command window, it will start in your home directory (say `c:\Users\cwoac`)
+`cd Desktop\thingy_grabber` to get to `c:\Users\cwoac\Desktop\thingy_grabber` and check that you are right by trying to run `thingy_grabber` - you should get a long list of possible command line options that looks a lot like the list further up. 
+Supposing you want to download all of my stuff (for some crazy reason), then the command will look like this
+
+`thingy_grabber -a YOURAPIKEY -d "c:\Users\cwoac\Documents\things" -c user cwoac`
+
+The `-c` will cause the script to compress the download to a 7z file to save space. If you prefer to leave it uncompressed, just omit the `-c`
+That's the basics. Well, acutally, there isn't much more than that to be honest. There is a batch mode so if you create a text file with a list of lines like
+```
+user cwoac
+user solutionlesn
+collection cwoac at2018
+```
+then you can use the `batch` target to run each of these in turn. If you run it a second time with the same options it will only download things which have changed or been added.
+
+## Modes
 ### Things
 `thingy_grabber.py thing thingid1 thingid2 ...`
 This will create a directory named after the title of the thing(s) with the given ID(s) and download the files into it.

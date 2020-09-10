@@ -145,7 +145,6 @@ def truncate_name(file_name):
     path = os.path.abspath(file_name)
     if len(path) <= MAX_PATH_LENGTH:
         return path
-    to_cut = len(path) - (MAX_PATH_LENGTH + 3)
     base, extension = os.path.splitext(path)
     inc = 0
     new_path = "{}_{}{}".format(base, inc, extension)
@@ -172,24 +171,33 @@ class Downloader(multiprocessing.Process):
     Class to handle downloading the things we have found to get.
     """
 
-    def __init__(self, thing_queue, download_directory, compress):
+    def __init__(self, thing_queue, download_directory, compress, api_key):
         multiprocessing.Process.__init__(self)
         # TODO: add parameters
         self.thing_queue = thing_queue
         self.download_directory = download_directory
         self.compress = compress
+        self.api_key = api_key
 
     def run(self):
         """ actual download loop.
         """
         while True:
-            thing_id = self.thing_queue.get
+            thing_id = self.thing_queue.get()
             if thing_id is None:
                 logging.info("Shutting download queue")
                 self.thing_queue.task_done()
                 break
-            logging.info("Handling id {}".format(thing_id))
-            Thing(thing_id).download(self.download_directory, self.compress)
+            thing = None
+            if isinstance(thing_id, str):
+                thing = Thing.from_thing_id(thing_id)
+            if isinstance(thing_id, ThingLink):
+                thing = Thing(thing_id)
+            if not thing:
+                logging.error("Don't know how to handle thing_id {}".format(thing_id))
+            else:
+                logging.info("Handling id {}".format(thing_id))
+                thing.download(self.download_directory, self.compress, self.api_key)
             self.thing_queue.task_done()
         return
 
@@ -227,7 +235,6 @@ class Grouping:
 
         # Get the internal details of the grouping.
         logging.debug("Querying {}".format(sanitise_url(self.url)))
-        page = 0
 
         # self.url should already have been formatted as we don't need pagination
         logging.info("requesting:{}".format(sanitise_url(self.url)))
@@ -262,8 +269,8 @@ class Grouping:
         logging.info("Downloading {} thing(s).".format(self.total))
         for idx, thing in enumerate(self.things):
             logging.info("Downloading thing {} - {}".format(idx, thing))
-            RC = Thing(thing).download(self.download_dir, self.compress)
-            if self.quick and RC == State.ALREADY_DOWNLOADED:
+            return_code = Thing(thing).download(self.download_dir, self.compress)
+            if self.quick and return_code == State.ALREADY_DOWNLOADED:
                 logging.info("Caught up, stopping.")
                 return
 
@@ -321,7 +328,6 @@ class Thing:
     def __init__(self, thing_link):
         self.thing_id = thing_link.thing_id
         self.name = thing_link.name
-        self.api_link = thing_link.api_link
         self.last_time = None
         self._parsed = False
         self._needs_download = True
@@ -331,13 +337,24 @@ class Thing:
         self._file_links = FileLinks()
         self._image_links = []
 
-    def _parse(self, base_dir):
+    @classmethod
+    def from_thing_id(cls, thing_id):
+        """
+        Factory method that looks up a thing by ID and creates a Thing object for it
+        :param thing_id: to look up
+        :return: Thing or None
+        """
+        return Thing(ThingLink(thing_id, "", ""))
+
+
+    def _parse(self, base_dir, api_key):
         """ Work out what, if anything needs to be done. """
         if self._parsed:
             return
 
         # First get the broad details
-        url = API_THING_DETAILS.format(self.thing_id, API_KEY)
+        url = API_THING_DETAILS.format(self.thing_id, api_key)
+        logging.error(url)
         try:
             current_req = SESSION.get(url)
         except requests.exceptions.ConnectionError as error:
@@ -365,8 +382,16 @@ class Thing:
         except KeyError:
             logging.warning("No description found for thing {}?".format(self.thing_id))
 
+        if not self.name:
+            # Probably generated with factory method.
+            try:
+                self.name = thing_json['name']
+            except KeyError:
+                logging.warning("No name found for thing {}?".format(self.thing_id))
+                self.name = self.thing_id
+
         # Now get the file details
-        file_url = API_THING_FILES.format(self.thing_id, API_KEY)
+        file_url = API_THING_FILES.format(self.thing_id, api_key)
 
         try:
             current_req = SESSION.get(file_url)
@@ -391,12 +416,12 @@ class Thing:
             try:
                 datestamp = datetime.datetime.strptime(link['date'], DEFAULT_DATETIME_FORMAT)
                 self._file_links.append(
-                    FileLink(link['name'], datestamp, link['url'] + API_THING_DOWNLOAD.format(API_KEY)))
+                    FileLink(link['name'], datestamp, link['url'] + API_THING_DOWNLOAD.format(api_key)))
             except ValueError:
                 logging.error(link['date'])
 
         # Finally get the image links
-        image_url = API_THING_IMAGES.format(self.thing_id, API_KEY)
+        image_url = API_THING_IMAGES.format(self.thing_id, api_key)
 
         try:
             current_req = SESSION.get(image_url)
@@ -534,14 +559,14 @@ class Thing:
                 latest_time = candidate_time
                 latest = candidate
         logging.info("Found last old thing: {} / {}".format(latest, latest_time))
-        return (latest, latest_time)
+        return latest, latest_time
 
-    def download(self, base_dir, compress):
+    def download(self, base_dir, compress, api_key):
         """ Download all files for a given thing. 
             Returns True iff the thing is now downloaded (not iff it downloads the thing!)
         """
         if not self._parsed:
-            self._parse(base_dir)
+            self._parse(base_dir, api_key)
 
         if not self._parsed:
             logging.error(
@@ -718,7 +743,7 @@ def do_batch(batch_file, download_dir, quick, compress):
             if command_arr[0] == "thing":
                 logging.debug(
                     "Handling batch thing instruction: {}".format(line))
-                Thing(command_arr[1]).download(download_dir, compress)
+                Thing.from_thing_id(command_arr[1]).download(download_dir, compress)
                 continue
             if command_arr[0] == "collection":
                 logging.debug(
@@ -807,7 +832,7 @@ def main():
     # Start downloader
     thing_queue = multiprocessing.JoinableQueue()
     logging.debug("starting {} downloader(s)".format(DOWNLOADER_COUNT))
-    downloaders = [Downloader(thing_queue, args.directory, args.compress) for _ in range(DOWNLOADER_COUNT)]
+    downloaders = [Downloader(thing_queue, args.directory, args.compress, API_KEY) for _ in range(DOWNLOADER_COUNT)]
     for downloader in downloaders:
         downloader.start()
 

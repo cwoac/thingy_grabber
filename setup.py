@@ -16,4 +16,4 @@ setup(name='Thingy Grabber',
       version = '0.6.2',
       description = 'Thingiverse Grabber',
       options = dict(build_exe = buildOptions),
-      executables = executables)
+      executables = executables, requires=['py7zr', 'requests'])

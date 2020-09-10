@@ -29,7 +29,7 @@ SAFE_DATETIME_FORMAT = '%Y-%m-%d %H.%M.%S'
 API_BASE = "https://api.thingiverse.com"
 ACCESS_QP = "access_token={}"
 PAGE_QP = "page={}"
-API_USER_DESIGNS = API_BASE + "/users/{}/things/"
+API_USER_DESIGNS = API_BASE + "/users/{}/things/?" + ACCESS_QP
 API_USER_COLLECTIONS = API_BASE + "/users/{}/collections/all?" + ACCESS_QP
 
 # Currently useless as it gives the same info as the matching element in API_USER_COLLECTIONS
@@ -40,8 +40,6 @@ API_THING_DETAILS = API_BASE + "/things/{}/?" + ACCESS_QP
 API_THING_FILES = API_BASE + "/things/{}/files/?" + ACCESS_QP
 API_THING_IMAGES = API_BASE + "/things/{}/images/?" + ACCESS_QP
 API_THING_DOWNLOAD = "/download/?" + ACCESS_QP
-
-API_KEY = None
 
 DOWNLOADER_COUNT = 1
 RETRY_COUNT = 3
@@ -208,7 +206,7 @@ class Grouping:
         - use Collection or Designs instead.
     """
 
-    def __init__(self, quick, compress):
+    def __init__(self, quick, compress, api_key):
         self.things = []
         self.total = 0
         self.req_id = None
@@ -217,9 +215,11 @@ class Grouping:
         # Should we stop downloading when we hit a known datestamp?
         self.quick = quick
         self.compress = compress
+        self.api_key = api_key
         # These should be set by child classes.
         self.url = None
         self.download_dir = None
+
 
     @property
     def get(self):
@@ -254,7 +254,7 @@ class Grouping:
     def download(self):
         """ Downloads all the files in a collection """
         if not self.things:
-            self.get()
+            self.get
 
         if not self.download_dir:
             raise ValueError(
@@ -269,7 +269,7 @@ class Grouping:
         logging.info("Downloading {} thing(s).".format(self.total))
         for idx, thing in enumerate(self.things):
             logging.info("Downloading thing {} - {}".format(idx, thing))
-            return_code = Thing(thing).download(self.download_dir, self.compress)
+            return_code = Thing(thing).download(self.download_dir, self.compress, self.api_key)
             if self.quick and return_code == State.ALREADY_DOWNLOADED:
                 logging.info("Caught up, stopping.")
                 return
@@ -278,13 +278,13 @@ class Grouping:
 class Collection(Grouping):
     """ Holds details of a collection. """
 
-    def __init__(self, user, name, directory, quick, compress):
-        Grouping.__init__(self, quick, compress)
+    def __init__(self, user, name, directory, quick, compress, api_key):
+        Grouping.__init__(self, quick, compress, api_key)
         self.user = user
         self.name = name
         self.paginated = False
         # need to figure out the the ID for the collection
-        collection_url = API_USER_COLLECTIONS.format(user, API_KEY)
+        collection_url = API_USER_COLLECTIONS.format(user, api_key)
         try:
             current_req = SESSION.get(collection_url)
         except requests.exceptions.ConnectionError as error:
@@ -304,7 +304,7 @@ class Collection(Grouping):
             logging.error("Unable to find collection {} for user {}".format(name, user))
             return
         self.collection_id = collection['id']
-        self.url = API_COLLECTION_THINGS.format(self.collection_id, API_KEY)
+        self.url = API_COLLECTION_THINGS.format(self.collection_id, api_key)
 
         self.download_dir = os.path.join(directory,
                                          "{}-{}".format(slugify(self.user), slugify(self.name)))
@@ -313,11 +313,10 @@ class Collection(Grouping):
 class Designs(Grouping):
     """ Holds details of all of a users' designs. """
 
-    def __init__(self, user, directory, quick, compress):
-        Grouping.__init__(self, quick, compress)
+    def __init__(self, user, directory, quick, compress, api_key):
+        Grouping.__init__(self, quick, compress, api_key)
         self.user = user
-        self.url = API_USER_DESIGNS.format(user)
-        self.paginated = True
+        self.url = API_USER_DESIGNS.format(user, api_key)
         self.download_dir = os.path.join(
             directory, "{} designs".format(slugify(self.user)))
 
@@ -811,13 +810,13 @@ def main():
     console_handler = logging.StreamHandler()
     console_handler.setLevel(args.log_level.upper())
 
-    global API_KEY
+
     if args.api_key:
-        API_KEY = args.api_key
+        api_key = args.api_key
     else:
         try:
             with open("api.key") as fh:
-                API_KEY = fh.read().strip()
+                api_key = fh.read().strip()
         except Exception as e:
             logging.error("Either specify the api-key on the command line or in a file called 'api.key'")
             logging.error("Exception: {}".format(e))
@@ -833,19 +832,19 @@ def main():
     # Start downloader
     thing_queue = multiprocessing.JoinableQueue()
     logging.debug("starting {} downloader(s)".format(DOWNLOADER_COUNT))
-    downloaders = [Downloader(thing_queue, args.directory, args.compress, API_KEY) for _ in range(DOWNLOADER_COUNT)]
+    downloaders = [Downloader(thing_queue, args.directory, args.compress, api_key) for _ in range(DOWNLOADER_COUNT)]
     for downloader in downloaders:
         downloader.start()
 
     if args.subcommand.startswith("collection"):
         for collection in args.collections:
-            Collection(args.owner, collection, args.directory, args.quick, args.compress).download()
+            Collection(args.owner, collection, args.directory, args.quick, args.compress, api_key).download()
     if args.subcommand == "thing":
         for thing in args.things:
             thing_queue.put(thing)
     if args.subcommand == "user":
         for user in args.users:
-            Designs(user, args.directory, args.quick, args.compress).download()
+            Designs(user, args.directory, args.quick, args.compress, api_key).download()
     if args.subcommand == "version":
         print("thingy_grabber.py version {}".format(VERSION))
     if args.subcommand == "batch":

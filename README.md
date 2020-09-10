@@ -29,9 +29,6 @@ optional arguments:
                         API key for thingiverse
 ````
 
-## Warning
-Currently downloading individual things by ID is broken. This should be fixed soon.
-
 ## API KEYs
 Thingy_grabber v0.10.0 accesses thingiverse in a _substantially_ different way to before. The plus side is it should be more reliable, possibly faster and no longer needs selenium or a firefox instance (and so drastically reduces memory overhead). The downside is you are _going_ to have to do something to continue using the app - basically get yourself an API KEY.
 
@@ -127,6 +124,9 @@ python3, requests, py7xr (>=0.8.2)
 - If there is an updated file, the old directory will be moved to `name_timestamp` where `timestamp` is the last upload time of the old files. The code will then copy unchanged files across and download any new ones.
 
 ## Changelog
+* v0.10.3
+  - Handle trailing whitespace in thing names
+  - Fix raw thing grabbing
 * v0.10.2
   - Fixed regression in rest API
 * v0.10.1

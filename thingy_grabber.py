@@ -48,7 +48,7 @@ RETRY_COUNT = 3
 
 MAX_PATH_LENGTH = 250
 
-VERSION = "0.10.2"
+VERSION = "0.10.3"
 
 TIMESTAMP_FILE = "timestamp.txt"
 
@@ -163,7 +163,7 @@ def slugify(value):
     value = unicodedata.normalize('NFKC', value).lower().strip()
     value = re.sub(r'[\\/<>:?*|"]', '', value)
     value = re.sub(r'\.*$', '', value)
-    return value
+    return value.strip()
 
 
 class Downloader(multiprocessing.Process):
@@ -615,6 +615,7 @@ class Thing:
         logging.debug("Generating download_dir")
         os.mkdir(self.download_dir)
         filelist_file = os.path.join(self.download_dir, "filelist.txt")
+        logging.error("\nd:{}\nf:{}".format(self.download_dir, filelist_file))
         with open(filelist_file, 'w', encoding="utf-8") as fl_handle:
             for fl in self._file_links:
                 fl_handle.write("{},{},{}\n".format(fl.link, fl.name, fl.last_update))

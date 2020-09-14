@@ -66,7 +66,7 @@ class MLStripper(HTMLParser):
         super().__init__()
         self.reset()
         self.strict = False
-        self.convert_charrefs= True
+        self.convert_charrefs = True
         self.text = StringIO()
 
     def handle_data(self, d):
@@ -80,6 +80,7 @@ class MLStripper(HTMLParser):
         s = MLStripper()
         s.feed(html)
         return s.get_data()
+
 
 @dataclass
 class ThingLink:
@@ -248,7 +249,6 @@ class Grouping:
         self.url = None
         self.download_dir = None
 
-
     @property
     def get(self):
         """ retrieve the things of the grouping. """
@@ -288,7 +288,6 @@ class Grouping:
             raise ValueError(
                 "No download_dir set - invalidly initialised object?")
 
-        base_dir = os.getcwd()
         try:
             os.mkdir(self.download_dir)
         except FileExistsError:
@@ -373,7 +372,6 @@ class Thing:
         """
         return Thing(ThingLink(thing_id, "", ""))
 
-
     def _parse(self, base_dir, api_key):
         """ Work out what, if anything needs to be done. """
         if self._parsed:
@@ -408,14 +406,12 @@ class Thing:
         except KeyError:
             logging.warning("No description found for thing {}?".format(self.thing_id))
 
-
         if details:
             try:
                 self._details = MLStripper.strip_tags(details)
             except ValueError as e:
                 logging.warning("Unable to strip HTML from readme: {}".format(e))
                 self._details = details
-
 
         if not self.name:
             # Probably generated with factory method.
@@ -765,7 +761,7 @@ class Thing:
         return State.OK
 
 
-def do_batch(batch_file, download_dir, quick, compress):
+def do_batch(batch_file, download_dir, quick, compress, api_key):
     """ Read a file in line by line, parsing each as a set of calls to this script."""
     with open(batch_file) as handle:
         for line in handle:
@@ -778,18 +774,18 @@ def do_batch(batch_file, download_dir, quick, compress):
             if command_arr[0] == "thing":
                 logging.debug(
                     "Handling batch thing instruction: {}".format(line))
-                Thing.from_thing_id(command_arr[1]).download(download_dir, compress)
+                Thing.from_thing_id(command_arr[1]).download(download_dir, compress, api_key)
                 continue
             if command_arr[0] == "collection":
                 logging.debug(
                     "Handling batch collection instruction: {}".format(line))
                 Collection(command_arr[1], command_arr[2],
-                           download_dir, quick, compress).download()
+                           download_dir, quick, compress, api_key).download()
                 continue
             if command_arr[0] == "user":
                 logging.debug(
                     "Handling batch collection instruction: {}".format(line))
-                Designs(command_arr[1], download_dir, quick, compress).download()
+                Designs(command_arr[1], download_dir, quick, compress, api_key).download()
                 continue
             logging.warning("Unable to parse current instruction. Skipping.")
 
@@ -845,7 +841,6 @@ def main():
     console_handler = logging.StreamHandler()
     console_handler.setLevel(args.log_level.upper())
 
-
     if args.api_key:
         api_key = args.api_key
     else:
@@ -883,7 +878,7 @@ def main():
     if args.subcommand == "version":
         print("thingy_grabber.py version {}".format(VERSION))
     if args.subcommand == "batch":
-        do_batch(args.batch_file, args.directory, args.quick, args.compress)
+        do_batch(args.batch_file, args.directory, args.quick, args.compress, api_key)
 
     # Stop the downloader processes
     for _ in downloaders:

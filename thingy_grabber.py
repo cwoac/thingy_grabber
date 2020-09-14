@@ -18,6 +18,8 @@ from dataclasses import dataclass
 import py7zr
 import glob
 import shutil
+from io import StringIO
+from html.parser import HTMLParser
 
 SEVENZIP_FILTERS = [{'id': py7zr.FILTER_LZMA2}]
 
@@ -46,12 +48,38 @@ RETRY_COUNT = 3
 
 MAX_PATH_LENGTH = 250
 
-VERSION = "0.10.3"
+VERSION = "0.10.4"
 
 TIMESTAMP_FILE = "timestamp.txt"
 
 SESSION = requests.Session()
 
+
+class MLStripper(HTMLParser):
+    """ Turns HTML markup into plain text
+    """
+
+    def error(self, message):
+        raise ValueError(message)
+
+    def __init__(self):
+        super().__init__()
+        self.reset()
+        self.strict = False
+        self.convert_charrefs= True
+        self.text = StringIO()
+
+    def handle_data(self, d):
+        self.text.write(d)
+
+    def get_data(self):
+        return self.text.getvalue()
+
+    @staticmethod
+    def strip_tags(html):
+        s = MLStripper()
+        s.feed(html)
+        return s.get_data()
 
 @dataclass
 class ThingLink:
@@ -353,7 +381,6 @@ class Thing:
 
         # First get the broad details
         url = API_THING_DETAILS.format(self.thing_id, api_key)
-        logging.error(url)
         try:
             current_req = SESSION.get(url)
         except requests.exceptions.ConnectionError as error:
@@ -375,11 +402,20 @@ class Thing:
         except KeyError:
             logging.warning("No license found for thing {}?".format(self.thing_id))
 
-        # TODO: Get non-html version of this?
+        details = None
         try:
-            self._details = thing_json['details']
+            details = thing_json['details']
         except KeyError:
             logging.warning("No description found for thing {}?".format(self.thing_id))
+
+
+        if details:
+            try:
+                self._details = MLStripper.strip_tags(details)
+            except ValueError as e:
+                logging.warning("Unable to strip HTML from readme: {}".format(e))
+                self._details = details
+
 
         if not self.name:
             # Probably generated with factory method.

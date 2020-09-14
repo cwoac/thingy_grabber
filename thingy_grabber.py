@@ -274,7 +274,7 @@ class Grouping:
         else:
             current_json = current_req.json()
             for thing in current_json:
-                logging.info(thing)
+                logging.debug(thing)
                 self.things.append(ThingLink(thing['id'], thing['name'], thing['url']))
         logging.info("Found {} things.".format(len(self.things)))
         return self.things

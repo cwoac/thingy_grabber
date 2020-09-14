@@ -614,7 +614,6 @@ class Thing:
         logging.debug("Generating download_dir")
         os.mkdir(self.download_dir)
         filelist_file = os.path.join(self.download_dir, "filelist.txt")
-        logging.error("\nd:{}\nf:{}".format(self.download_dir, filelist_file))
         with open(filelist_file, 'w', encoding="utf-8") as fl_handle:
             for fl in self._file_links:
                 fl_handle.write("{},{},{}\n".format(fl.link, fl.name, fl.last_update))

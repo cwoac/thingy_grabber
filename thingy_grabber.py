@@ -682,7 +682,9 @@ class Thing:
                     file_link.name, file_link.link, file_name))
                 data_req = SESSION.get(file_link.link)
                 if data_req.status_code != 200:
-                    logging.error("Unexpected status code {} for {}: {}".format(data_req.status_code,
+                    logging.error("Unexpected status code {} for {}".format(data_req.status_code,
+                                                                                sanitise_url(file_link.link)))
+                    logging.debug("Unexpected status code {} for {}: {}".format(data_req.status_code,
                                                                                 sanitise_url(file_link.link),
                                                                                 data_req.text))
                     fail_dir(self.download_dir)

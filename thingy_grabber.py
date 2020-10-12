@@ -264,18 +264,21 @@ class Grouping:
         # Get the internal details of the grouping.
         logging.debug("Querying {}".format(sanitise_url(self.url)))
 
-        # self.url should already have been formatted as we don't need pagination
-        logging.info("requesting:{}".format(sanitise_url(self.url)))
-        current_req = SESSION.get(self.url)
-        if current_req.status_code != 200:
-            logging.error(
-                "Got unexpected code {} from url {}: {}".format(current_req.status_code, sanitise_url(self.url),
-                                                                current_req.text))
-        else:
-            current_json = current_req.json()
-            for thing in current_json:
-                logging.debug(thing)
-                self.things.append(ThingLink(thing['id'], thing['name'], thing['url']))
+        # follow next links until all items are found
+        current_url = self.url
+        while current_url != None:
+            logging.info("requesting:{}".format(sanitise_url(current_url)))
+            current_req = SESSION.get(current_url)
+            current_url = current_req.links.get('next', {}).get('url')
+            if current_req.status_code != 200:
+                logging.error(
+                    "Got unexpected code {} from url {}: {}".format(current_req.status_code, sanitise_url(self.url),
+                                                                    current_req.text))
+            else:
+                current_json = current_req.json()
+                for thing in current_json:
+                    logging.debug(thing)
+                    self.things.append(ThingLink(thing['id'], thing['name'], thing['url']))
         logging.info("Found {} things.".format(len(self.things)))
         return self.things
 

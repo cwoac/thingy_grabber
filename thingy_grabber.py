@@ -48,7 +48,7 @@ RETRY_COUNT = 3
 
 MAX_PATH_LENGTH = 250
 
-VERSION = "0.10.4"
+VERSION = "0.10.5"
 
 TIMESTAMP_FILE = "timestamp.txt"
 

@@ -124,6 +124,9 @@ python3, requests, py7xr (>=0.8.2)
 - If there is an updated file, the old directory will be moved to `name_timestamp` where `timestamp` is the last upload time of the old files. The code will then copy unchanged files across and download any new ones.
 
 ## Changelog
+* v0.10.5
+  - Fixed handling users with >30 things (thanks Clinton).
+  - Added standard contrib and code of conduct files.
 * v0.10.4
   - Readme.txt files are now text files, not HTML files.
   - removed some debug print statements that I forgot to remove from the last release (oops).

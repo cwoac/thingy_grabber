@@ -20,6 +20,7 @@ import glob
 import shutil
 from io import StringIO
 from html.parser import HTMLParser
+import json
 
 SEVENZIP_FILTERS = [{'id': py7zr.FILTER_LZMA2}]
 
@@ -365,6 +366,7 @@ class Thing:
         self.time_stamp = None
         self._file_links = FileLinks()
         self._image_links = []
+        self._json = None
 
     @classmethod
     def from_thing_id(cls, thing_id):
@@ -398,6 +400,7 @@ class Thing:
             return
 
         thing_json = current_req.json()
+        self._json = thing_json
         try:
             self._license = thing_json['license']
         except KeyError:
@@ -736,6 +739,15 @@ class Thing:
                     readme_handle.write("{}\n".format(self._details))
         except IOError as exception:
             logging.warning("Failed to write readme! {}".format(exception))
+
+        logging.info("writing thing json")
+        try:
+            if self._json:
+                with open(truncate_name(os.path.join(self.download_dir, 'thing:{}.json'.format(self.thing_id))), 'w',
+                          encoding="utf-8") as json_handle:
+                    json.dump(self._json, json_handle, indent=2)
+        except IOError as exception:
+            logging.warning("Failed to write thing json! {}".format(exception))
 
         try:
             # Now write the timestamp

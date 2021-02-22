@@ -369,6 +369,8 @@ class Designs(Grouping):
         Grouping.__init__(self, quick, compress, api_key)
         self.user = user
         self.url = API_USER_DESIGNS.format(user, api_key)
+        self.info_url = API_USER_DESIGNS.format(user,api_key)
+        self.info_filename = 'designs:{}.json'.format(user)
         self.download_dir = os.path.join(
             directory, "{} designs".format(slugify(self.user)))
 

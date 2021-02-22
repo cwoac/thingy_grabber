@@ -20,6 +20,7 @@ import glob
 import shutil
 from io import StringIO
 from html.parser import HTMLParser
+import json
 
 SEVENZIP_FILTERS = [{'id': py7zr.FILTER_LZMA2}]
 
@@ -247,6 +248,8 @@ class Grouping:
         self.api_key = api_key
         # These should be set by child classes.
         self.url = None
+        self.info_url = None
+        self.info_filename = None
         self.download_dir = None
 
     @property
@@ -296,6 +299,23 @@ class Grouping:
         except FileExistsError:
             logging.info("Target directory {} already exists. Assuming a resume."
                          .format(self.download_dir))
+
+        if self.info_url and self.info_filename:
+            logging.info("writing grouping json")
+            try:
+                try:
+                    current_req = SESSION.get(self.info_url)
+                    info_json = current_req.json()
+                except requests.exceptions.ConnectionError as error:
+                    logging.error("Unable to connect for grouping info {}: {}".format(
+                        self.info_url, error))
+                if info_json:
+                    with open(truncate_name(os.path.join(self.download_dir,self.info_filename)), 'w',
+                              encoding="utf-8") as json_handle:
+                        json.dump(info_json, json_handle, indent=2)
+            except IOError as exception:
+                logging.warning("Failed to write grouping json! {}".format(exception))
+
         logging.info("Downloading {} thing(s).".format(self.total))
         for idx, thing in enumerate(self.things):
             logging.info("Downloading thing {} - {}".format(idx, thing))
@@ -335,6 +355,8 @@ class Collection(Grouping):
             return
         self.collection_id = collection['id']
         self.url = API_COLLECTION_THINGS.format(self.collection_id, api_key)
+        self.info_url = API_COLLECTION.format(self.collection_id, api_key)
+        self.info_filename = 'collection:{}.json'.format(self.collection_id)
 
         self.download_dir = os.path.join(directory,
                                          "{}-{}".format(slugify(self.user), slugify(self.name)))
@@ -347,6 +369,8 @@ class Designs(Grouping):
         Grouping.__init__(self, quick, compress, api_key)
         self.user = user
         self.url = API_USER_DESIGNS.format(user, api_key)
+        self.info_url = API_USER_DESIGNS.format(user,api_key)
+        self.info_filename = 'designs:{}.json'.format(user)
         self.download_dir = os.path.join(
             directory, "{} designs".format(slugify(self.user)))
 
@@ -365,6 +389,7 @@ class Thing:
         self.time_stamp = None
         self._file_links = FileLinks()
         self._image_links = []
+        self._json = None
 
     @classmethod
     def from_thing_id(cls, thing_id):
@@ -398,6 +423,7 @@ class Thing:
             return
 
         thing_json = current_req.json()
+        self._json = thing_json
         try:
             self._license = thing_json['license']
         except KeyError:
@@ -736,6 +762,15 @@ class Thing:
                     readme_handle.write("{}\n".format(self._details))
         except IOError as exception:
             logging.warning("Failed to write readme! {}".format(exception))
+
+        logging.info("writing thing json")
+        try:
+            if self._json:
+                with open(truncate_name(os.path.join(self.download_dir, 'thing:{}.json'.format(self.thing_id))), 'w',
+                          encoding="utf-8") as json_handle:
+                    json.dump(self._json, json_handle, indent=2)
+        except IOError as exception:
+            logging.warning("Failed to write thing json! {}".format(exception))
 
         try:
             # Now write the timestamp

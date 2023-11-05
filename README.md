@@ -41,6 +41,14 @@ Because API keys can (are?) rate limited.
 ## Downloads
 The latest version can be downloaded from here: https://github.com/cwoac/thingy_grabber/releases/.  Under the 'assets' triangle there is precompiled binaries for windows (no python needed!).
 
+## Docker
+You can run thingy_grabber from a container
+
+```
+docker build -t thingy_grabber .
+docker run --rm -v $PWD:/things thingy_grabber -a YOURAPIKEY -d /things user cwoac
+```
+
 ## Getting started
 First download the code. Either grab the source, or get the windows binary from above and extract it somewhere. If you are running from source, see `requirements.yaml` for the packages you need. You will also need an API key (as above) and to make a directory to store your downloads in.
 

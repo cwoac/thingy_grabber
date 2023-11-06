@@ -33,6 +33,7 @@ ACCESS_QP = "access_token={}"
 PAGE_QP = "page={}"
 API_USER_DESIGNS = API_BASE + "/users/{}/things/?" + ACCESS_QP
 API_USER_COLLECTIONS = API_BASE + "/users/{}/collections/all?" + ACCESS_QP
+API_USER_LIKES = API_BASE + "/users/{}/likes/?" + ACCESS_QP
 
 # Currently useless as it gives the same info as the matching element in API_USER_COLLECTIONS
 API_COLLECTION = API_BASE + "/collections/{}/?" + ACCESS_QP
@@ -350,6 +351,15 @@ class Designs(Grouping):
         self.download_dir = os.path.join(
             directory, "{} designs".format(slugify(self.user)))
 
+class Likes(Grouping):
+    """ Holds details of all of a users' liked things. """
+
+    def __init__(self, user, directory, quick, compress, api_key):
+        Grouping.__init__(self, quick, compress, api_key)
+        self.user = user
+        self.url = API_USER_LIKES.format(user, api_key)
+        self.download_dir = os.path.join(
+            directory, "{} likes".format(slugify(self.user)))
 
 class Thing:
     """ An individual design on thingiverse. """
@@ -792,6 +802,10 @@ def do_batch(batch_file, download_dir, quick, compress, api_key):
                     "Handling batch collection instruction: {}".format(line))
                 Designs(command_arr[1], download_dir, quick, compress, api_key).download()
                 continue
+            if command_arr[0] == "likes":
+                logging.debug(
+                    "Handling batch collection instruction: {}".format(line))
+                Likes(command_arr[1], download_dir, quick, compress, api_key).download()
             logging.warning("Unable to parse current instruction. Skipping.")
 
 
@@ -827,6 +841,10 @@ def main():
         "user", help="Download all things by one or more users")
     user_parser.add_argument(
         "users", nargs="+", help="A space seperated list of the user(s) to get the designs of")
+    likes_parser = subparsers.add_parser(
+        "likes", help="Download all things liked by one or more users")
+    likes_parser.add_argument(
+        "users", nargs="+", help="A space seperated list of the user(s) to get the likes of")
     batch_parser = subparsers.add_parser(
         "batch", help="Perform multiple actions written in a text file")
     batch_parser.add_argument(
@@ -880,6 +898,9 @@ def main():
     if args.subcommand == "user":
         for user in args.users:
             Designs(user, args.directory, args.quick, args.compress, api_key).download()
+    if args.subcommand == "likes":
+        for user in args.users:
+            Likes(user, args.directory, args.quick, args.compress, api_key).download()
     if args.subcommand == "version":
         print("thingy_grabber.py version {}".format(VERSION))
     if args.subcommand == "batch":
